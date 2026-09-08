@@ -83,14 +83,7 @@ object SpotifyWebToken {
      * copying the header is what a browser's developer tools make easy.
      */
     fun pasted(credentials: ProviderCredentials): String? {
-        val token = credentials.spotifyWebToken
-            ?.trim()
-            ?.removePrefix("Authorization:")
-            ?.trim()
-            ?.removePrefix("Bearer ")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: return null
+        val token = bearerValue(credentials.spotifyWebToken) ?: return null
 
         // An expired token is worse than none: every request fails and the reason is
         // invisible. Its own expiry claim says when, so there is no need to guess.

@@ -152,20 +152,34 @@ class LyricsRepository(
             // have is not already the best kind.
             val worthRetrying = (base.value as? Base.Ready)?.document?.kind != LyricsKind.SYLLABLE
             if (!worthRetrying) return@launch
-            setTrack(track, forceIsrc = isrc)
+            // `freshen`, because the answer already on screen was cached under a key that does not
+            // include the ISRC — so re-asking would be served the same fuzzy result straight back
+            // out of the cache, and the ISRC would change nothing for thirty days.
+            trackGeneration++
+            setTrack(track, forceIsrc = isrc, freshen = true)
         }
     }
 
     fun setTrack(track: TrackInfo?) {
+        // Claimed synchronously, before anything suspends. Reading the stored ISRC involves a file,
+        // so two tracks arriving in quick succession could otherwise finish out of order and leave
+        // the app showing the earlier one's lyrics — the reader wins the race and the listener
+        // loses.
+        val generation = ++trackGeneration
+
         scope.launch {
             // The ISRC, if this track has been played before with something that knew it. Read
             // first because it changes which sources can answer exactly rather than approximately.
             val isrc = track?.let { isrcStore.get(it.cacheKey) }
+            if (generation != trackGeneration) return@launch
             setTrack(track, forceIsrc = isrc)
         }
     }
 
-    private fun setTrack(track: TrackInfo?, forceIsrc: String?) {
+    /** Counts track changes, so a slow read cannot install a track that has been superseded. */
+    private var trackGeneration = 0
+
+    private fun setTrack(track: TrackInfo?, forceIsrc: String?, freshen: Boolean = false) {
         val request = track?.takeIf { !it.isEmpty }?.toRequest(forceIsrc)
 
         // The identity ignores the ISRC, so learning one does not make this look like a new track.
@@ -187,7 +201,7 @@ class LyricsRepository(
         }
 
         base.value = Base.Loading
-        fetchJob = scope.launch { fetchBase(request) }
+        fetchJob = scope.launch { fetchBase(request, freshen = freshen) }
     }
 
     /**
@@ -330,16 +344,23 @@ class LyricsRepository(
 
     // ---- fetching -----------------------------------------------------------
 
-    private suspend fun fetchBase(request: LyricsRequest) {
+    /**
+     * @param freshen skip the stored answer and ask the sources again, keeping whatever comes back.
+     *   For when the question has improved rather than the answer having aged: an ISRC learned since
+     *   last time makes an exact lookup possible where only a guess was before.
+     */
+    private suspend fun fetchBase(request: LyricsRequest, freshen: Boolean = false) {
         val key = request.cacheIdentity()
 
-        when (val cached = cache.get(key)) {
-            is LyricsCache.Result.Hit -> {
-                base.value = Base.Ready(key, cached.document)
-                return
-            }
+        if (!freshen) {
+            when (val cached = cache.get(key)) {
+                is LyricsCache.Result.Hit -> {
+                    base.value = Base.Ready(key, cached.document)
+                    return
+                }
 
-            null -> Unit
+                null -> Unit
+            }
         }
 
         // A local file always wins, and answers without touching the network.

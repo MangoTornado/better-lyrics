@@ -787,7 +787,8 @@ fun SettingsSheet(
                     help = "A JWT, valid for months rather than an hour — which makes it the " +
                         "token worth having. Open music.apple.com, developer tools, Network " +
                         "tab, and copy the Authorization header off any request to " +
-                        "amp-api.music.apple.com.\n\nOn its own this gets the artist image " +
+                        "amp-api.music.apple.com — the whole header or just the token, either " +
+                        "works.\n\nOn its own this gets the artist image " +
                         "and the full-size cover art, no subscription needed. Syllable-level " +
                         "lyrics need the music user token below as well, and a subscription.",
                     value = settings.appleDeveloperToken.orEmpty(),

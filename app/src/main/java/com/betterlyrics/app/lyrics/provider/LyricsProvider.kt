@@ -164,6 +164,28 @@ interface ProviderCredentials {
     var cachedSpotifyTokenExpiresAt: Long
 }
 
+/**
+ * A token as the user pasted it, reduced to the token.
+ *
+ * Every one of these is copied out of a browser's developer tools, where the easy thing to copy is
+ * the whole `Authorization` header. Sending that back with another `Bearer` in front of it is an
+ * invalid header and a 401 that looks exactly like an expired token — so accept what people
+ * actually have to hand.
+ */
+fun bearerValue(raw: String?): String? {
+    var value = raw?.trim() ?: return null
+    // Case-insensitively, because developer tools copy header names in lower case.
+    if (value.startsWith("authorization:", ignoreCase = true)) {
+        value = value.substring("authorization:".length).trim()
+    }
+    if (value.startsWith("bearer", ignoreCase = true)) {
+        // The scheme word only, not a token that happens to begin with those letters.
+        val rest = value.substring("bearer".length)
+        if (rest.isEmpty() || rest.first().isWhitespace()) value = rest.trim()
+    }
+    return value.takeIf { it.isNotEmpty() }
+}
+
 /** Shared HTTP plumbing. One client, so connections and DNS are reused. */
 object Http {
     private const val USER_AGENT =

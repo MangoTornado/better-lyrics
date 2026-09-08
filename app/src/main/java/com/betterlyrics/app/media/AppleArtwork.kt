@@ -3,6 +3,7 @@ package com.betterlyrics.app.media
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.betterlyrics.app.lyrics.provider.Http
+import com.betterlyrics.app.lyrics.provider.bearerValue
 import com.betterlyrics.app.lyrics.provider.LyricsRequest
 import com.betterlyrics.app.lyrics.provider.Matching
 import com.betterlyrics.app.lyrics.provider.ProviderCredentials
@@ -141,7 +142,7 @@ class AppleArtwork(private val credentials: ProviderCredentials) {
     }
 
     private fun headers(): Map<String, String> = mapOf(
-        "Authorization" to "Bearer ${credentials.appleDeveloperToken.orEmpty()}",
+        "Authorization" to "Bearer ${bearerValue(credentials.appleDeveloperToken).orEmpty()}",
         "Origin" to "https://music.apple.com",
         "Referer" to "https://music.apple.com/",
         "Accept" to "application/json",

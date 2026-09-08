@@ -129,7 +129,7 @@ class AppleMusicProvider(private val credentials: ProviderCredentials) : LyricsP
     }
 
     private fun headers(): Map<String, String> = mapOf(
-        "Authorization" to "Bearer ${credentials.appleDeveloperToken.orEmpty()}",
+        "Authorization" to "Bearer ${bearerValue(credentials.appleDeveloperToken).orEmpty()}",
         "Media-User-Token" to credentials.appleMusicUserToken.orEmpty(),
         "Origin" to "https://music.apple.com",
         "Referer" to "https://music.apple.com/",

@@ -142,15 +142,38 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
         }.getOrNull()
     }
 
-    /** Load one of the URLs [fetch] returned. */
+    /**
+     * Load one of the URLs [fetch] returned.
+     *
+     * The key goes only to the server's own address. These URLs are allowed to point anywhere —
+     * the contract says so, and in practice they point at Spotify's or Apple's image CDN — so
+     * attaching the header unconditionally would hand the server's bearer key to whichever
+     * third party the server happened to name.
+     */
     suspend fun image(url: String): Bitmap? = withContext(Dispatchers.IO) {
+        val headers = if (isOurs(url)) headers() else mapOf("Accept" to "image/*")
         runCatching {
-            Http.client.newCall(Http.request(url, headers())).execute().use { response ->
+            Http.client.newCall(Http.request(url, headers)).execute().use { response ->
                 if (!response.isSuccessful) return@runCatching null
                 response.body?.bytes()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
             }
         }.getOrNull()
     }
+
+    /**
+     * Whether [url] is the configured server, so the key belongs on it.
+     *
+     * Compared on scheme, host and port rather than as a prefix: `https://mine.example.evil.com`
+     * starts with nothing useful, but a naive `startsWith` on a base without a trailing slash
+     * would accept `https://mine.example.com.evil.net`.
+     */
+    private fun isOurs(url: String): Boolean = runCatching {
+        val base = base()?.let { java.net.URI(it) } ?: return false
+        val target = java.net.URI(url)
+        target.scheme.equals(base.scheme, ignoreCase = true) &&
+            target.host.equals(base.host, ignoreCase = true) &&
+            target.port == base.port
+    }.getOrDefault(false)
 
     private fun parse(body: String): CachedExtras? = parseCachedExtras(body)
 

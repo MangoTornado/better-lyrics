@@ -88,6 +88,12 @@ class AppContainer(context: Context) {
         scope = scope,
     )
 
+    /**
+     * Below this on the short edge, a cover is soft enough behind full-screen lyrics to be worth
+     * replacing. Matches the threshold [ArtworkSearch] uses to decide the same thing.
+     */
+    private val ARTWORK_GOOD_ENOUGH_PX = 500
+
     /** Finds and installs new releases, since nothing else will. */
     val updater = Updater(context, settings)
 
@@ -126,17 +132,6 @@ class AppContainer(context: Context) {
 
         // Warm the cache for whatever is queued next, when the player says what that is.
         scope.launch {
-            combine(
-                media.snapshot.map { it.track },
-                settings.settings.map { it.artworkSource },
-            ) { track, source -> track to source }
-                .distinctUntilChanged { old, new ->
-                    old.first?.cacheKey == new.first?.cacheKey && old.second == new.second
-                }
-                .collectLatest { (track, source) -> loadSearchedArtwork(track, source) }
-        }
-
-        scope.launch {
             media.snapshot
                 .map { it.nextTrack }
                 .distinctUntilChanged { old, new -> old?.cacheKey == new?.cacheKey }
@@ -148,15 +143,33 @@ class AppContainer(context: Context) {
         // pasting a cookie has to take effect on what is playing rather than being invisible
         // until the song changes.
         scope.launch {
-            combine(
-                media.snapshot.map { it.track?.spotifyTrackId },
-                settings.settings.map { it.useSpotifyExtras to it.spDcCookie },
-            ) { trackId, (enabled, cookie) -> Triple(trackId, enabled, cookie) }
+            combine(media.snapshot, settings.settings) { snapshot, settings ->
+                ExtrasInputs(
+                    track = snapshot.track,
+                    // The player's own artwork is an input, not just a fallback: a session that
+                    // publishes a URI sends the track first with no bitmap and the bitmap after,
+                    // and once that arrives a searched cover may no longer be an improvement.
+                    playerArtworkSize = snapshot.artwork
+                        ?.let { minOf(it.width, it.height) }
+                        ?: 0,
+                    enabled = settings.useSpotifyExtras,
+                    artworkSource = settings.artworkSource,
+                    // Every credential the chain consults. Keyed on the values, so pasting a token
+                    // takes effect on the track that is playing rather than the one after it.
+                    spotifyToken = settings.spotifyWebToken.orEmpty() + settings.spDcCookie.orEmpty(),
+                    appleToken = settings.appleDeveloperToken.orEmpty(),
+                    server = if (settings.cacheServerExtrasActive) {
+                        settings.cacheServerUrl.orEmpty() + settings.cacheServerKey.orEmpty()
+                    } else {
+                        ""
+                    },
+                )
+            }
                 .distinctUntilChanged()
-                // collectLatest, not collect: a track change must abandon the previous
-                // track's downloads instead of queueing behind them, or the tempo of the
-                // song that just ended gets applied to the one that just started.
-                .collectLatest { (trackId, _, _) -> loadExtras(trackId) }
+                // collectLatest, not collect: a track change must abandon the previous track's
+                // downloads instead of queueing behind them, or the tempo of the song that just
+                // ended gets applied to the one that just started.
+                .collectLatest { inputs -> loadExtras(inputs) }
         }
     }
 
@@ -170,37 +183,32 @@ class AppContainer(context: Context) {
      */
     val searchedArtwork: StateFlow<Bitmap?> = _searchedArtwork.asStateFlow()
 
-    private suspend fun loadSearchedArtwork(track: TrackInfo?, source: ArtworkSource) {
-        _searchedArtwork.value = null
-        if (track == null || track.isEmpty || source == ArtworkSource.PLAYER) return
-        // A token beats a title search, so do not spend a request competing with one. This is
-        // also why the search is a separate flow: it must not wait on Spotify to find out.
-        if (spotifyExtras.isAvailable || appleArtwork.isAvailable) return
-        // And for the server, which may be holding Spotify's own artwork from a day when
-        // somebody had a token.
-        if (settings.current.cacheServerExtrasActive) return
-        // Only worth a request when what the player gave us is not good enough.
-        if (!artworkSearch.wouldImproveOn(media.snapshot.value.artwork)) return
-
-        val found = runCatching { artworkSearch.find(track, source) }.getOrNull() ?: return
-        // The track may have changed while that was in flight.
-        if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
-        _searchedArtwork.value = found
-    }
-
     /**
-     * The artist image, the full-size cover and the tempo.
+     * Everything the artwork chain reads.
      *
-     * Spotify first, whenever a token is there: it identifies the track by id rather than by
-     * name, so it cannot be matching the wrong song, and it is the only one of these that has
-     * the tempo. Apple second — it can only match on title and artist, but its token lasts
-     * months rather than an hour, so it is what still works tomorrow.
+     * A data class rather than a tuple because the list kept growing and the bug it caused was
+     * invisible: the flow de-duplicated on a Spotify track id, so for any player that publishes
+     * none — most of them — every track looked identical to the last and the Apple and cache-server
+     * steps never ran at all.
      */
-    private suspend fun loadExtras(trackId: String?) {
+    private data class ExtrasInputs(
+        val track: TrackInfo?,
+        val playerArtworkSize: Int,
+        val enabled: Boolean,
+        val artworkSource: ArtworkSource,
+        val spotifyToken: String,
+        val appleToken: String,
+        val server: String,
+    )
+
+    private suspend fun loadExtras(inputs: ExtrasInputs) {
         _extras.value = NowPlayingExtras()
+        _searchedArtwork.value = null
+        if (!inputs.enabled) return
+
+        val track = inputs.track?.takeIf { !it.isEmpty } ?: return
+        val trackId = track.spotifyTrackId
         val settingsNow = settings.current
-        if (!settingsNow.useSpotifyExtras) return
-        val track = media.snapshot.value.track
 
         if (trackId != null) {
             // Spotify's endpoints report an outage by throwing rather than returning null, so
@@ -233,8 +241,6 @@ class AppContainer(context: Context) {
             }
         }
 
-        if (track == null) return
-
         // Nothing from Spotify — no token, no match, or an expired token. Apple next: it can
         // only match on name, but its token lasts months rather than an hour.
         if (appleArtwork.isAvailable) {
@@ -254,26 +260,61 @@ class AppContainer(context: Context) {
             }
         }
 
-        // No token at all. Whatever the server found for itself, back when it had one.
-        if (!settingsNow.cacheServerExtrasActive) return
-        val cached = runCatching { cacheServerExtras.fetch(track) }.getOrNull() ?: return
-        // The server has been collecting these from its own tokens. This is how a phone with none
-        // still gets an exact match.
-        cached.isrc?.let { lyrics.noteIsrc(track, it) }
-        val cover = cached.coverUrl?.let { url ->
-            runCatching { cacheServerExtras.image(url) }.getOrNull()
+        // Whatever the server found for itself, back when it had a token.
+        if (settingsNow.cacheServerExtrasActive) {
+            val cached = runCatching { cacheServerExtras.fetch(track) }.getOrNull()
+            if (cached != null) {
+                // The server collects these from its own tokens. This is how a phone with none
+                // still gets an exact match.
+                cached.isrc?.let { lyrics.noteIsrc(track, it) }
+                val cover = cached.coverUrl?.let { url ->
+                    runCatching { cacheServerExtras.image(url) }.getOrNull()
+                }
+                val artist = cached.artistImageUrl?.let { url ->
+                    runCatching { cacheServerExtras.image(url) }.getOrNull()
+                }
+                if (cover != null || artist != null || cached.tempo != null) {
+                    if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
+                    _extras.value = NowPlayingExtras(
+                        trackId = trackId,
+                        artistImage = artist,
+                        cover = cover,
+                        tempo = cached.tempo,
+                    )
+                    if (cover != null) return
+                }
+            }
         }
-        val artist = cached.artistImageUrl?.let { url ->
-            runCatching { cacheServerExtras.image(url) }.getOrNull()
-        }
-        if (cover == null && artist == null && cached.tempo == null) return
+
+        // Last: the keyless search, if a source is chosen for it.
+        //
+        // Reached whenever nothing above actually produced a cover — which is the fix for a real
+        // failure, not a nicety. It used to stand down whenever a token merely *existed*, so an
+        // expired Apple token or a cache server holding nothing for this track left the screen with
+        // the player's thumbnail and no way to improve on it.
+        searchForArtwork(track, inputs)
+    }
+
+    /**
+     * A bigger cover from a keyless source, when nothing with a token could supply one.
+     *
+     * Judged against the artwork the player published *now*, from the same snapshot the flow keyed
+     * on — not by re-reading it. A session that publishes a URI sends the bitmap in a later
+     * emission, and this function runs again for that emission; deciding from a live read would let
+     * the two disagree about which artwork it was comparing.
+     */
+    private suspend fun searchForArtwork(track: TrackInfo, inputs: ExtrasInputs) {
+        if (inputs.artworkSource == ArtworkSource.PLAYER) return
+        // Nothing above found one, so there is something to improve on by definition — but the
+        // player's own may already be good enough.
+        if (inputs.playerArtworkSize >= ARTWORK_GOOD_ENOUGH_PX) return
+
+        val found = runCatching { artworkSearch.find(track, inputs.artworkSource) }.getOrNull()
+            ?: return
         if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
-        _extras.value = NowPlayingExtras(
-            trackId = trackId,
-            artistImage = artist,
-            cover = cover,
-            tempo = cached.tempo,
-        )
+        // And only if it is actually an improvement on what the player gave us.
+        if (minOf(found.width, found.height) <= inputs.playerArtworkSize) return
+        _searchedArtwork.value = found
     }
 }
 
