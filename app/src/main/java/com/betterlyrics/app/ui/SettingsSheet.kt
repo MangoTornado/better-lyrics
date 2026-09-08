@@ -783,8 +783,11 @@ fun SettingsSheet(
 
                 SecretField(
                     label = "Musixmatch user token",
-                    help = "Optional. A token from the Musixmatch desktop app covers more of the " +
-                        "catalogue than the anonymous one this app can mint for itself.",
+                    help = "Optional — the app mints an anonymous one for itself, which covers " +
+                        "most tracks. A signed-in token lifts the rate limit and widens the " +
+                        "catalogue. The desktop app it used to come from is discontinued; sign " +
+                        "in at musixmatch.com, open your browser's developer tools, and read " +
+                        "the usertoken parameter off any /ws/1.1/ request the page makes.",
                     value = settings.musixmatchUserToken.orEmpty(),
                     accent = accent,
                     onChange = { store.updateMusixmatchUserToken(it) },

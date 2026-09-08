@@ -25,17 +25,20 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * Musixmatch — the widest source of *richsync*, true per-word timings, for Western music.
  *
- * **It needs a token of your own now.** The anonymous token the desktop web player used to
- * hand out is no longer issued: `token.get` answers 200 with a row of zeros, and a request
- * carrying that gets lyrics for an unrelated song. So the provider still tries for one — in
- * case it starts working again — but reports itself unconfigured until either that succeeds
- * or the user pastes in a real one, rather than being asked on every track and quietly
- * returning nothing.
+ * Works with no account, via the token the mobile client mints for itself. Note the host and
+ * client id: the **desktop** app is discontinued and its endpoint now hands out a token of
+ * fifty-six zeros, which is accepted and returns lyrics for a different song entirely. The
+ * mobile one issues real tokens and still reaches richsync.
+ *
+ * That token is rate-limited per address, so it is minted once and kept. A user token from
+ * a signed-in account can be pasted in instead, which raises the limits and widens the
+ * catalogue, but is not required.
  *
  * It is an undocumented endpoint, so every step degrades: no token means no provider, a
- * token that stops working is dropped and re-fetched once, a match that does not look like
- * the track playing is refused, and a missing richsync falls back to line-synced subtitles
- * and then to plain lyrics.
+ * token that stops working is dropped and re-fetched once, a throttle is reported as the
+ * service being unavailable rather than as the track having no lyrics, a match that does not
+ * look like the track playing is refused, and a missing richsync falls back to line-synced
+ * subtitles and then to plain lyrics.
  */
 class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsProvider {
 
@@ -44,20 +47,19 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
     override val canBeWordSynced = true
 
     /**
-     * Set once the anonymous endpoint has been asked and found to be useless.
+     * Set once the token endpoint has answered and had nothing usable to give.
      *
-     * In memory rather than in preferences, so a launch after Musixmatch fixes their end
-     * tries again. Until it is set the provider reports itself configured, or it would
-     * never get the one request it needs to find out.
+     * A throttle does not count — that is a wait — so this only trips on a real refusal. In
+     * memory rather than in preferences, so the next launch tries again: an endpoint that
+     * broke can be fixed, and this app is in no position to decide it never will be.
      */
     private var anonymousTokenDead = false
 
     /**
      * A token of the user's own, a cached anonymous one, or the benefit of the doubt.
      *
-     * Deliberately not "always true": with the anonymous endpoint handing out a dead token,
-     * claiming to be configured meant a request per track that could only fail — which is
-     * exactly what "Musixmatch doesn't work" looked like from the outside.
+     * The last of those matters: the token is minted on the first lookup, so a provider that
+     * called itself unconfigured until it had one would never get the request it needs.
      */
     override val isConfigured: Boolean
         get() = !credentials.musixmatchUserToken.isNullOrBlank() ||
@@ -94,29 +96,62 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
             documentFrom(macro, request, token)
         }
 
+    /**
+     * Mint an anonymous token.
+     *
+     * Needed once per install: the result is kept in preferences, because the endpoint is
+     * rate-limited per address and will answer `401 captcha` to a caller that asks twice in
+     * quick succession. That is a wait, not a refusal, so it is reported as the endpoint
+     * being unavailable rather than as this track having no lyrics.
+     *
+     * @throws Http.Unavailable when the endpoint is throttling.
+     */
     private suspend fun obtainToken(): String? {
-        val url = "https://apic-desktop.musixmatch.com/ws/1.1/token.get" +
-            "?app_id=web-desktop-app-v1.0&t=${System.currentTimeMillis()}"
-        return Http.get(url, HEADERS) { body ->
+        val url = "$API/token.get?app_id=$APP_ID&t=${System.currentTimeMillis()}"
+        val outcome = Http.get(url, HEADERS) { body ->
             runCatching {
                 val message = Json.parseToJsonElement(body).jsonObject["message"]?.jsonObject
                 val status = message?.get("header")?.jsonObject?.get("status_code")
                     ?.jsonPrimitive?.intOrNull
-                if (status != 200) return@runCatching null
-                message["body"]?.jsonObject?.get("user_token")?.jsonPrimitive?.contentOrNull
-                    ?.takeIf { it.isUsableToken() }
+                val hint = message?.get("header")?.jsonObject?.get("hint")
+                    ?.jsonPrimitive?.contentOrNull
+
+                when {
+                    // The whole response is 200; the real status is inside it.
+                    status == 401 -> TokenOutcome.Throttled(hint ?: "rate limited")
+                    status != 200 -> TokenOutcome.Refused
+                    else -> message["body"]?.jsonObject?.get("user_token")
+                        ?.jsonPrimitive?.contentOrNull
+                        ?.takeIf { it.isUsableToken() }
+                        ?.let { TokenOutcome.Minted(it) }
+                        ?: TokenOutcome.Refused
+                }
             }.getOrNull()
         }
+
+        return when (outcome) {
+            is TokenOutcome.Minted -> outcome.token
+            is TokenOutcome.Throttled -> throw Http.Unavailable("$API/token.get (${outcome.hint})")
+            else -> null
+        }
+    }
+
+    private sealed interface TokenOutcome {
+        data class Minted(val token: String) : TokenOutcome
+        data class Throttled(val hint: String) : TokenOutcome
+
+        /** Answered, and had nothing usable to give. */
+        data object Refused : TokenOutcome
     }
 
     /**
      * Whether a token from `token.get` is worth keeping.
      *
-     * The endpoint stopped issuing real anonymous tokens: it answers 200 with fifty-six
-     * zeros. A request carrying one is accepted and returns lyrics for an unrelated song —
-     * asking for Kenshi Yonezu's "Lemon" came back with Drake — so it is worse than no
-     * token at all. Any token made of a single repeated character is rejected, which covers
-     * the zeros, the old `UpgradeOnly…` placeholder and whatever comes next.
+     * The discontinued desktop endpoint answers 200 with fifty-six zeros, and a request
+     * carrying that is accepted and returns lyrics for an unrelated song — asking for Kenshi
+     * Yonezu's "Lemon" came back with Drake. Worse than no token at all, so any token made
+     * of a single repeated character is rejected: the zeros, the older `UpgradeOnly…`
+     * placeholder, and whatever they do next.
      */
     private fun String.isUsableToken(): Boolean {
         val value = trim()
@@ -127,9 +162,9 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
 
     private suspend fun macroCall(request: LyricsRequest, token: String): JsonObject? {
         val url = buildString {
-            append("https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get")
+            append("$API/macro.subtitles.get")
             append("?format=json&namespace=lyrics_richsynched&subtitle_format=mxm")
-            append("&app_id=web-desktop-app-v1.0")
+            append("&app_id=").append(APP_ID)
             append("&usertoken=").append(Http.encode(token))
             append("&q_track=").append(Http.encode(request.cleanTitle))
             append("&q_artist=").append(Http.encode(request.primaryArtist))
@@ -217,8 +252,8 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
     }
 
     private suspend fun fetchRichsync(trackId: String, token: String): String? {
-        val url = "https://apic-desktop.musixmatch.com/ws/1.1/track.richsync.get" +
-            "?format=json&app_id=web-desktop-app-v1.0&usertoken=${Http.encode(token)}" +
+        val url = "$API/track.richsync.get" +
+            "?format=json&app_id=$APP_ID&usertoken=${Http.encode(token)}" +
             "&track_id=${Http.encode(trackId)}"
         return Http.get(url, HEADERS) { body ->
             runCatching {
@@ -358,8 +393,20 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         runCatching { jsonObject }.getOrNull()
 
     private companion object {
+        /**
+         * The host and client the mobile app uses.
+         *
+         * Not `apic-desktop.musixmatch.com` with `web-desktop-app-v1.0`: the desktop app is
+         * discontinued and its endpoint now hands out a token of fifty-six zeros, which is
+         * accepted and answers with lyrics for an unrelated song. The mobile client's host
+         * still issues real tokens, and they still reach richsync — the per-word timings that
+         * are the reason to use Musixmatch at all.
+         */
+        const val API = "https://apic.musixmatch.com/ws/1.1"
+        const val APP_ID = "android-player-v1.0"
+
         val HEADERS = mapOf(
-            "authority" to "apic-desktop.musixmatch.com",
+            "authority" to "apic.musixmatch.com",
             "Cookie" to "x-mxm-token-guid=",
             "User-Agent" to
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
