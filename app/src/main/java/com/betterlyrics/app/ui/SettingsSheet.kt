@@ -57,6 +57,7 @@ import com.betterlyrics.app.settings.TextAnimationStyle
 import com.betterlyrics.app.settings.ViewMode
 import com.betterlyrics.app.ui.components.AppIcons
 import com.betterlyrics.app.settings.TranslationSource
+import com.betterlyrics.app.settings.CacheServerMode
 import kotlinx.coroutines.launch
 
 /**
@@ -842,6 +843,69 @@ fun SettingsSheet(
                 accent = accent,
                 onClick = { showCredits = true },
             )
+
+            // ---- developer -------------------------------------------------
+            Divider()
+            SectionTitle("Developer")
+
+            ToggleRow(
+                title = "Developer options",
+                subtitle = "For testing a lyrics server of your own",
+                checked = settings.developerMode,
+                accent = accent,
+                onCheckedChange = { store.setDeveloperMode(it) },
+            )
+            Help(
+                "Nothing here is needed to use the app, and with this off none of it is " +
+                    "reachable — a server URL left in preferences stops being used the moment " +
+                    "the switch goes off, rather than quietly answering.",
+            )
+
+            if (settings.developerMode) {
+                SecretField(
+                    label = "Cache server URL",
+                    help = "A server of your own that sits in front of the free sources and " +
+                        "remembers what it fetched. Leave empty to not use one. Sent as " +
+                        "GET {url}/v1/lyrics?title=&artist=&album=&durationMs=&spotifyId= — " +
+                        "TTML, LRC, or JSON wrapping either is accepted.",
+                    value = settings.cacheServerUrl.orEmpty(),
+                    accent = accent,
+                    onChange = { store.updateCacheServerUrl(it) },
+                )
+
+                ChipGroup(
+                    label = "How to use it",
+                    options = CacheServerMode.entries.map { it to it.label },
+                    selected = settings.cacheServerMode,
+                    accent = accent,
+                    onSelect = { store.setCacheServerMode(it) },
+                )
+                Hint(
+                    when (settings.cacheServerMode) {
+                        CacheServerMode.PARALLEL ->
+                            "Asked first, alongside every source you have enabled. The best " +
+                                "answer still wins, so the app keeps working whatever the " +
+                                "server does — and the server sees every track you play."
+                        CacheServerMode.ONLY ->
+                            "The only source asked. Nothing falls back, so a track with no " +
+                                "lyrics means the server could not answer it."
+                    },
+                )
+                Help(
+                    "Two modes because they answer different questions. Alongside is for " +
+                        "filling the cache while the server is still being written: real " +
+                        "traffic reaches it, and a gap in it costs you nothing because the " +
+                        "ordinary sources are answering too. Only is for testing the server " +
+                        "itself — when nothing else can answer, what it is missing becomes " +
+                        "visible. Your own imported files still win in either mode, and " +
+                        "results are still cached on the phone, so use \u201cLook this track " +
+                        "up again\u201d above when you want to force a fresh request.",
+                )
+
+                if (settings.cacheServerUrl.isNullOrBlank()) {
+                    Hint("No URL set, so the cache server is not being asked.")
+                }
+            }
 
             Spacer(Modifier.height(24.dp))
         }

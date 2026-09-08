@@ -13,6 +13,7 @@ import com.betterlyrics.app.lyrics.provider.LyricsRequest
 import com.betterlyrics.app.lyrics.romanize.Romanizer
 import com.betterlyrics.app.lyrics.translate.LyricsTranslator
 import com.betterlyrics.app.media.TrackInfo
+import com.betterlyrics.app.settings.CacheServerMode
 import com.betterlyrics.app.settings.Settings
 import com.betterlyrics.app.settings.SettingsStore
 import com.betterlyrics.app.settings.TranslationSource
@@ -271,12 +272,7 @@ class LyricsRepository(
      */
     private suspend fun query(request: LyricsRequest): Query {
         val settings = settingsStore.current
-        val enabled = settings.providerOrder
-            .filter { it in settings.enabledProviders && it != localStore.id }
-            .mapNotNull { id -> providers.firstOrNull { it.id == id } }
-            // A provider missing its token is skipped rather than queried, so it costs
-            // nothing to leave enabled while you go and find the token.
-            .filter { it.isConfigured }
+        val enabled = providersFor(settings, providers, localStore.id)
 
         if (enabled.isEmpty()) return Query.Answered(null)
 
@@ -307,8 +303,14 @@ class LyricsRepository(
                 .maxWithOrNull(
                     compareBy(
                         { (_, document) -> qualityScore(document) },
-                        // Earlier in the user's order wins a tie.
-                        { (id, _) -> -settings.providerOrder.indexOf(id) },
+                        // Earlier in the user's order wins a tie. A provider that is not
+                        // in that order at all — the cache server — is not last by
+                        // accident of `indexOf` returning -1; it is first on purpose,
+                        // because an equally good answer from the cache is the one that
+                        // cost nobody a request.
+                        { (id, _) ->
+                            settings.providerOrder.indexOf(id).let { if (it < 0) 1 else -it }
+                        },
                     ),
                 )?.second,
         )
@@ -421,3 +423,44 @@ class LyricsRepository(
         const val PROVIDER_TIMEOUT_MS = 12_000L
     }
 }
+
+/**
+ * Which providers to ask for a track, in the order the user put them in.
+ *
+ * Three rules, in order:
+ *
+ * 1. Local files never appear. They are answered before anything is asked at all, and a
+ *    file the user imported outranks every network source by definition.
+ * 2. A provider missing its token is dropped rather than queried, so leaving one enabled
+ *    while you go and find the token costs nothing.
+ * 3. A cache server, when the developer options are on, either joins the front of the
+ *    fan-out or replaces it entirely — see [CacheServerMode]. It goes first so that a
+ *    hit is what the tie-break sees.
+ *
+ * Free of the repository's state so it can be tested directly: which sources a given
+ * settings object will actually hit is exactly the sort of thing that is easy to get
+ * subtly wrong and impossible to notice.
+ */
+internal fun providersFor(
+    settings: Settings,
+    providers: List<LyricsProvider>,
+    localProviderId: String,
+): List<LyricsProvider> {
+    val cacheServer = providers
+        .firstOrNull { it.id == CACHE_SERVER_ID }
+        ?.takeIf { settings.cacheServerActive && it.isConfigured }
+
+    if (cacheServer != null && settings.cacheServerMode == CacheServerMode.ONLY) {
+        return listOf(cacheServer)
+    }
+
+    val ordinary = settings.providerOrder
+        .filter { it in settings.enabledProviders && it != localProviderId }
+        .filter { it != CACHE_SERVER_ID }
+        .mapNotNull { id -> providers.firstOrNull { it.id == id } }
+        .filter { it.isConfigured }
+
+    return listOfNotNull(cacheServer) + ordinary
+}
+
+private const val CACHE_SERVER_ID = "cacheserver"

@@ -6,6 +6,7 @@ import com.betterlyrics.app.lyrics.LyricsCache
 import com.betterlyrics.app.lyrics.LyricsRepository
 import com.betterlyrics.app.lyrics.provider.AmllTtmlProvider
 import com.betterlyrics.app.lyrics.provider.AppleMusicProvider
+import com.betterlyrics.app.lyrics.provider.CacheServerProvider
 import com.betterlyrics.app.lyrics.provider.LocalLyricsStore
 import com.betterlyrics.app.lyrics.provider.LrcLibProvider
 import com.betterlyrics.app.lyrics.provider.LyricsProvider
@@ -47,6 +48,7 @@ class AppContainer(context: Context) {
     /** Every provider that exists; Settings decides which are asked and in what order. */
     val providers: List<LyricsProvider> = listOf(
         localLyrics,
+        CacheServerProvider(settings),
         AppleMusicProvider(settings),
         AmllTtmlProvider(settings),
         SpotifyLyricsProvider(settings),

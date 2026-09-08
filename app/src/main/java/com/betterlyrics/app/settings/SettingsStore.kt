@@ -80,6 +80,20 @@ enum class TranslationSource(val label: String) {
     DEVICE("On this device"),
 }
 
+/**
+ * How a caching server of your own is used alongside the ordinary sources.
+ *
+ * Two modes because they answer different questions. [PARALLEL] is for filling the cache
+ * while the server is still being written: every track is asked of both, so the server sees
+ * real traffic and the app keeps working whatever the server does. [ONLY] is for testing
+ * the server itself — if it cannot answer, nothing else will, which is the only way to find
+ * out what it is actually missing.
+ */
+enum class CacheServerMode(val label: String) {
+    PARALLEL("Alongside the others"),
+    ONLY("Only the cache server"),
+}
+
 /** Which half of the screen the album art and track info occupy in Cinema view. */
 enum class MediaPanelSide(val label: String) {
     /** Left in landscape, top in portrait. */
@@ -205,7 +219,17 @@ data class Settings(
     val appleDeveloperToken: String? = null,
     val appleMusicUserToken: String? = null,
     val appleStorefront: String = "us",
+
+    // ---- developer options ------------------------------------------------
+    /** Reveals the section below in Settings. Off, and none of it is reachable. */
+    val developerMode: Boolean = false,
+    val cacheServerUrl: String? = null,
+    val cacheServerMode: CacheServerMode = CacheServerMode.PARALLEL,
 ) {
+    /** True when a cache server is configured and the developer options are on. */
+    val cacheServerActive: Boolean
+        get() = developerMode && !cacheServerUrl.isNullOrBlank()
+
     companion object {
         val DEFAULT_PROVIDER_ORDER = listOf(
             // Highest first. `amll` outranks everything token-free because its files are
@@ -302,6 +326,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         appleDeveloperToken = prefs.trimmed(KEY_APPLE_DEV_TOKEN),
         appleMusicUserToken = prefs.trimmed(KEY_APPLE_USER_TOKEN),
         appleStorefront = prefs.trimmed(KEY_APPLE_STOREFRONT) ?: "us",
+
+        developerMode = prefs.getBoolean(KEY_DEVELOPER_MODE, false),
+        cacheServerUrl = prefs.trimmed(KEY_CACHE_SERVER_URL),
+        cacheServerMode = prefs.enum(KEY_CACHE_SERVER_MODE, CacheServerMode.PARALLEL),
     )
 
     /**
@@ -479,6 +507,16 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_NETEASE_URL, value?.trim()?.trimEnd('/'))
     }
 
+    fun setDeveloperMode(value: Boolean) = edit { putBoolean(KEY_DEVELOPER_MODE, value) }
+
+    fun updateCacheServerUrl(value: String?) = edit {
+        putString(KEY_CACHE_SERVER_URL, value?.trim()?.trimEnd('/'))
+    }
+
+    fun setCacheServerMode(value: CacheServerMode) = edit {
+        putString(KEY_CACHE_SERVER_MODE, value.name)
+    }
+
     fun updateAmllBaseUrl(value: String?) = edit {
         putString(KEY_AMLL_URL, value?.trim()?.trimEnd('/'))
     }
@@ -500,6 +538,11 @@ class SettingsStore(context: Context) : ProviderCredentials {
     override val lrcLibBaseUrl: String get() = current.lrcLibBaseUrl
     override val neteaseBaseUrl: String get() = current.neteaseBaseUrl
     override val amllBaseUrl: String get() = current.amllBaseUrl
+
+    // Null unless the developer options are on, so a URL left behind in preferences
+    // cannot keep answering after the switch is turned off.
+    override val cacheServerUrl: String?
+        get() = current.cacheServerUrl?.takeIf { current.developerMode }
     override val neteaseCookie: String? get() = current.neteaseCookie
     override val musixmatchUserToken: String? get() = current.musixmatchUserToken
     override val appleDeveloperToken: String? get() = current.appleDeveloperToken
@@ -582,6 +625,9 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_LRCLIB_URL = "lrclib_url"
         const val KEY_NETEASE_URL = "netease_url"
         const val KEY_AMLL_URL = "amll_url"
+        const val KEY_DEVELOPER_MODE = "developer_mode"
+        const val KEY_CACHE_SERVER_URL = "cache_server_url"
+        const val KEY_CACHE_SERVER_MODE = "cache_server_mode"
         const val KEY_NETEASE_COOKIE = "netease_cookie"
         const val KEY_APPLE_DEV_TOKEN = "apple_dev_token"
         const val KEY_APPLE_USER_TOKEN = "apple_user_token"

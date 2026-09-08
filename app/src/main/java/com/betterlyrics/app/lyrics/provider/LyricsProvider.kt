@@ -98,6 +98,9 @@ interface ProviderCredentials {
      */
     val amllBaseUrl: String
 
+    /** A caching server of the user's own, set under the developer options. */
+    val cacheServerUrl: String?
+
     /** Optional: raises NetEase's per-IP limits and unlocks some regional catalogues. */
     val neteaseCookie: String?
 

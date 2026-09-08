@@ -16,6 +16,7 @@ class ProviderConfigurationTest {
 
     private class FakeCredentials(
         override var spDcCookie: String? = null,
+        override val cacheServerUrl: String? = null,
         override val appleDeveloperToken: String? = null,
         override val appleMusicUserToken: String? = null,
     ) : ProviderCredentials {
@@ -49,6 +50,15 @@ class ProviderConfigurationTest {
             AppleMusicProvider(
                 FakeCredentials(appleDeveloperToken = "jwt", appleMusicUserToken = "user"),
             ).isConfigured,
+        )
+    }
+
+    @Test
+    fun `the cache server needs a URL and nothing else`() {
+        assertFalse(CacheServerProvider(FakeCredentials()).isConfigured)
+        assertFalse(CacheServerProvider(FakeCredentials(cacheServerUrl = "  ")).isConfigured)
+        assertTrue(
+            CacheServerProvider(FakeCredentials(cacheServerUrl = "https://x.example")).isConfigured,
         )
     }
 
