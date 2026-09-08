@@ -1,0 +1,184 @@
+package com.betterlyrics.app.media
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.betterlyrics.app.lyrics.provider.Http
+import com.betterlyrics.app.lyrics.provider.ProviderCredentials
+import com.betterlyrics.app.lyrics.provider.SpotifyWebToken
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+/**
+ * Everything extra a Spotify token can buy, over and above the lyrics.
+ *
+ * A media session gives us a track title, an artist name and a small bitmap. With the same
+ * `sp_dc`-derived token the lyrics provider already uses, three better things become
+ * available:
+ *
+ * - the **artist image**, which is what Spicy Lyrics' "Artist Header" background is,
+ * - the **full-resolution album cover** (640 px, against the 200–300 px thumbnail most
+ *   players publish), which the background and the Cinema view both look better for,
+ * - the **audio analysis** — tempo and loudness — which lets the drifting background move
+ *   in time with the song rather than at a fixed rate.
+ *
+ * Everything here is best-effort. No token, no request; a failed request just means the
+ * app carries on with what the media session gave it.
+ */
+class SpotifyExtras(private val credentials: ProviderCredentials) {
+
+    data class TrackExtras(
+        val trackId: String,
+        /** Artist image, for the artist-header background. */
+        val artistImageUrl: String? = null,
+        /** Full-size album art, better than the session's thumbnail. */
+        val coverUrl: String? = null,
+        /** Beats per minute, for pacing the background. */
+        val tempo: Float? = null,
+        /** Overall loudness in dB (negative); a rough stand-in for energy. */
+        val loudness: Float? = null,
+    ) {
+        val hasAnything: Boolean
+            get() = artistImageUrl != null || coverUrl != null || tempo != null
+    }
+
+    /** True when a cookie is present, so the caller knows whether to bother asking. */
+    val isAvailable: Boolean
+        get() = !credentials.spDcCookie.isNullOrBlank()
+
+    private val extrasCache = LinkedHashMap<String, TrackExtras>()
+    private val bitmapCache = LinkedHashMap<String, Bitmap>()
+
+    suspend fun extrasFor(trackId: String): TrackExtras? = withContext(Dispatchers.IO) {
+        if (!isAvailable) return@withContext null
+        extrasCache[trackId]?.let { return@withContext it }
+
+        var token = SpotifyWebToken.get(credentials) ?: return@withContext null
+        var track = trackDetails(trackId, token)
+        if (track == null) {
+            token = SpotifyWebToken.refresh(credentials) ?: return@withContext null
+            track = trackDetails(trackId, token)
+        }
+
+        val artistImage = track?.artistId?.let { artistImage(it, token) }
+        val analysis = audioAnalysis(trackId, token)
+
+        val extras = TrackExtras(
+            trackId = trackId,
+            artistImageUrl = artistImage,
+            coverUrl = track?.coverUrl,
+            tempo = analysis?.first,
+            loudness = analysis?.second,
+        )
+        if (extras.hasAnything) remember(extrasCache, trackId, extras)
+        extras.takeIf { it.hasAnything }
+    }
+
+    /** Downloads and decodes an image URL, keeping the last few in memory. */
+    suspend fun image(url: String): Bitmap? = withContext(Dispatchers.IO) {
+        bitmapCache[url]?.let { return@withContext it }
+        val bytes = runCatching {
+            Http.client.newCall(Http.request(url)).execute().use { response ->
+                if (!response.isSuccessful) null else response.body?.bytes()
+            }
+        }.getOrNull() ?: return@withContext null
+
+        val bitmap = runCatching {
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull() ?: return@withContext null
+
+        remember(bitmapCache, url, bitmap)
+        bitmap
+    }
+
+    private class TrackDetails(val artistId: String?, val coverUrl: String?)
+
+    private fun trackDetails(trackId: String, token: String): TrackDetails? =
+        Http.get("$WEB_API/tracks/$trackId", bearer(token)) { body ->
+            runCatching {
+                val root = Json.parseToJsonElement(body).jsonObject
+                val artistId = root["artists"]?.jsonArray?.firstOrNull()
+                    ?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+                // Spotify returns images widest-first.
+                val cover = root["album"]?.jsonObject?.get("images")?.jsonArray
+                    ?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+                TrackDetails(artistId, cover)
+            }.getOrNull()
+        }
+
+    /**
+     * The artist's own image.
+     *
+     * Spicy Lyrics reaches the true wide *header* banner through Spotify's internal
+     * GraphQL gateway, which needs a persisted-query hash that changes with every client
+     * release. The documented endpoint gives the artist image instead — the same artwork,
+     * square rather than letterboxed — which is indistinguishable once it has been blurred
+     * into a background, and does not break when Spotify ships a new web player.
+     */
+    private fun artistImage(artistId: String, token: String): String? =
+        Http.get("$WEB_API/artists/$artistId", bearer(token)) { body ->
+            runCatching {
+                Json.parseToJsonElement(body).jsonObject["images"]?.jsonArray
+                    ?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+            }.getOrNull()
+        }
+
+    /** Returns tempo (BPM) and loudness (dB), or null when Spotify has no analysis. */
+    private fun audioAnalysis(trackId: String, token: String): Pair<Float, Float>? {
+        val url = "$SPCLIENT/audio-attributes/v1/audio-analysis/$trackId?format=json"
+        return Http.get(url, bearer(token)) { body ->
+            runCatching {
+                val track = Json.parseToJsonElement(body).jsonObject["track"]?.jsonObject
+                    ?: return@runCatching null
+                val tempo = track["tempo"]?.jsonPrimitive?.doubleOrNull?.toFloat()
+                    ?: track["tempo"]?.jsonPrimitive?.intOrNull?.toFloat()
+                    ?: return@runCatching null
+                val loudness = track["loudness"]?.jsonPrimitive?.doubleOrNull?.toFloat() ?: -8f
+                tempo to loudness
+            }.getOrNull()
+        }
+    }
+
+    private fun bearer(token: String) = mapOf(
+        "Authorization" to "Bearer $token",
+        "App-Platform" to "WebPlayer",
+        "User-Agent" to SpotifyWebToken.WEB_USER_AGENT,
+        "Accept" to "application/json",
+    )
+
+    /** Tiny LRU: only the current track and the couple before it are ever wanted again. */
+    private fun <T> remember(cache: LinkedHashMap<String, T>, key: String, value: T) {
+        cache.remove(key)
+        cache[key] = value
+        while (cache.size > CACHE_ENTRIES) {
+            val oldest = cache.keys.firstOrNull() ?: break
+            cache.remove(oldest)
+        }
+    }
+
+    private companion object {
+        const val WEB_API = "https://api.spotify.com/v1"
+        const val SPCLIENT = "https://spclient.wg.spotify.com"
+        const val CACHE_ENTRIES = 6
+    }
+}
+
+/**
+ * The resolved extras for the track playing now — images decoded, tempo in hand.
+ *
+ * Separate from [SpotifyExtras.TrackExtras] because that carries URLs; this is what the UI
+ * consumes, and it is deliberately cleared on every track change so a previous artist's
+ * face can never sit behind the wrong song.
+ */
+data class NowPlayingExtras(
+    val trackId: String? = null,
+    val artistImage: Bitmap? = null,
+    val cover: Bitmap? = null,
+    val tempo: Float? = null,
+)
