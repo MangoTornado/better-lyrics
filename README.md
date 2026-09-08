@@ -4,7 +4,7 @@
 
 A standalone Android app that shows word-by-word synced lyrics for whatever your phone
 is playing — Spotify, YouTube Music, Apple Music, a local player, anything — with the
-look and motion of [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics).
+look and motion of [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics) from [Spicetify](https://github.com/spicetify/cli).
 
 No Spotify login. No account of any kind.
 
@@ -243,23 +243,6 @@ adb shell "run-as com.betterlyrics.app.debug sh -c \
   'cat > /data/data/com.betterlyrics.app.debug/files/local-lyrics/bohemian_rhapsody-queen-177.lrc'" \
   < my.lrc
 ```
-
-## What is tested, and what is not
-
-`./gradlew :app:testDebugUnitTest` — 51 tests covering the parsers (LRC, enhanced LRC,
-NetEase yrc), romaji conversion, the spline and spring maths, title cleanup, candidate
-matching, script detection, and that no provider fires without its credentials.
-
-Verified by hand on an Android 16 emulator: media-session detection, local-file lookup,
-LRC parsing, the renderer, furigana, auto-scroll, tap-a-line-to-seek, hold-to-copy and
-selection, scrubbing, transport controls, Cinema view in both orientations, and the
-floating window.
-
-**Not yet verified end to end:** the network providers. The machine this was built on
-cannot reach `lrclib.net`, `music.163.com`, `apic-desktop.musixmatch.com` or
-`amp-api.music.apple.com`, so the request shapes and parsers are covered by unit tests
-against real response formats, but no live response has been through them. Expect to
-iterate on the first real run.
 
 Also worth knowing:
 
