@@ -105,9 +105,14 @@ fun PlayerScreen(
     var demoMode by remember { mutableStateOf(false) }
     // Spotify's full-size cover beats the thumbnail a media session publishes, so prefer it
     // for the background, the palette and the artwork everywhere it is shown.
+    val searchedArtwork by container.searchedArtwork.collectAsStateWithLifecycle()
+    // Spotify's full-size cover first, then one found by searching, then whatever the player
+    // published. In that order because each is a better claim about this exact track than the
+    // next: an id beats a title match, and a title match only beats a thumbnail because the
+    // thumbnail is too small to look at.
     val artwork = when {
         demoMode -> DemoLyrics.artwork
-        else -> extras.cover ?: snapshot.artwork
+        else -> extras.cover ?: searchedArtwork ?: snapshot.artwork
     }
     val colors = remember(artwork) { ArtworkColors.from(artwork) }
     var showSettings by remember { mutableStateOf(false) }

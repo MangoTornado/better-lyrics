@@ -31,6 +31,7 @@ class CacheServerContractTest {
         override val lrcLibBaseUrl = Settings.DEFAULT_LRCLIB_URL
         override val neteaseBaseUrl = Settings.DEFAULT_NETEASE_URL
         override val amllBaseUrl = Settings.DEFAULT_AMLL_URL
+        override val spotifyWebToken: String? = null
         override val neteaseCookie: String? = null
         override val musixmatchUserToken: String? = null
         override val appleDeveloperToken: String? = null

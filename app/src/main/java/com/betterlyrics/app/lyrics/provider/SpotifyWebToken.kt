@@ -52,8 +52,21 @@ object SpotifyWebToken {
         "https://open.spotify.com/api/token?reason=transport&productType=web_player",
     )
 
-    /** Cached until 30 s before expiry, then re-minted. Null when there is no cookie. */
+    /**
+     * A usable web access token, or null.
+     *
+     * Three sources, in order:
+     *
+     * 1. **One the user pasted in.** The mint is closed, but the endpoints it fed are not —
+     *    `color-lyrics` and `audio-attributes` both answer `401`, meaning "bring a token",
+     *    rather than `403`. A token copied out of the web player's own network traffic is
+     *    such a token, and it works until it expires.
+     * 2. A cached token from the mint, while one is still valid.
+     * 3. A fresh mint — which currently fails, see [BLOCKED_BY_SPOTIFY].
+     */
     suspend fun get(credentials: ProviderCredentials): String? {
+        pasted(credentials)?.let { return it }
+
         val cached = credentials.cachedSpotifyToken
         if (!cached.isNullOrBlank() &&
             credentials.cachedSpotifyTokenExpiresAt > System.currentTimeMillis() + 30_000
@@ -63,8 +76,58 @@ object SpotifyWebToken {
         return mint(credentials)
     }
 
-    /** Forces a fresh token — call once after a request is refused, then give up. */
+    /**
+     * The pasted token, if there is one and it has not expired.
+     *
+     * Accepts the whole `Authorization` header value as well as the bare token, because
+     * copying the header is what a browser's developer tools make easy.
+     */
+    fun pasted(credentials: ProviderCredentials): String? {
+        val token = credentials.spotifyWebToken
+            ?.trim()
+            ?.removePrefix("Authorization:")
+            ?.trim()
+            ?.removePrefix("Bearer ")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+
+        // An expired token is worse than none: every request fails and the reason is
+        // invisible. Its own expiry claim says when, so there is no need to guess.
+        val expiry = expiryOf(token)
+        if (expiry != null && expiry <= System.currentTimeMillis()) return null
+        return token
+    }
+
+    /**
+     * When a token expires, from its own `exp` claim, or null if it does not say.
+     *
+     * Spotify's access tokens are JWTs; the middle segment is base64url JSON. Read rather
+     * than assumed so Settings can show how much time is left, which is the difference
+     * between "this is broken" and "paste a fresh one".
+     */
+    fun expiryOf(token: String): Long? = runCatching {
+        val payload = token.split('.').getOrNull(1) ?: return null
+        val json = String(
+            android.util.Base64.decode(
+                payload,
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or
+                    android.util.Base64.NO_WRAP,
+            ),
+        )
+        Json.parseToJsonElement(json).jsonObject["exp"]?.jsonPrimitive?.longOrNull
+            ?.let { it * 1000L }
+    }.getOrNull()
+
+    /**
+     * Forces a fresh token — call once after a request is refused, then give up.
+     *
+     * A pasted token cannot be refreshed: it is whatever the user copied. Returning it again
+     * would loop, so this reports nothing and the caller gives up, which is correct — the
+     * token has expired and only the user can replace it.
+     */
     suspend fun refresh(credentials: ProviderCredentials): String? {
+        if (pasted(credentials) != null) return null
         credentials.cachedSpotifyToken = null
         return mint(credentials)
     }

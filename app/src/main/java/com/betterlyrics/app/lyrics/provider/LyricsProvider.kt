@@ -136,8 +136,16 @@ interface ProviderCredentials {
     val appleMusicUserToken: String?
     val appleStorefront: String
 
-    /** `sp_dc` cookie from a signed-in open.spotify.com session. */
+    /** `sp_dc` cookie from a signed-in open.spotify.com session. No longer usable on its own. */
     var spDcCookie: String?
+
+    /**
+     * A web access token lifted straight from the player, skipping the closed mint.
+     *
+     * Short-lived, so this is a developer setting rather than something to rely on — but it
+     * is a real one: the endpoints it opens are alive and answer to it.
+     */
+    val spotifyWebToken: String?
 
     /** Anonymous Musixmatch token, cached between launches. */
     var musixmatchGuestToken: String?
@@ -199,10 +207,22 @@ object Http {
     suspend fun <T> get(
         url: String,
         headers: Map<String, String> = emptyMap(),
+        /**
+         * Called with the HTTP status before the body is read.
+         *
+         * For the callers that need to tell a refusal from an absence — a `401` means a
+         * credential has expired, which is worth saying, while a `404` means this track has
+         * no lyrics here, which is not.
+         */
+        onStatus: (Int) -> Unit = {},
         block: (String) -> T?,
-    ): T? = body(url, headers)?.let(block)
+    ): T? = body(url, headers, onStatus)?.let(block)
 
-    private suspend fun body(url: String, headers: Map<String, String>): String? =
+    private suspend fun body(
+        url: String,
+        headers: Map<String, String>,
+        onStatus: (Int) -> Unit = {},
+    ): String? =
         suspendCancellableCoroutine { continuation ->
             val call = client.newCall(request(url, headers))
             continuation.invokeOnCancellation { runCatching { call.cancel() } }
@@ -218,6 +238,7 @@ object Http {
                         response.close()
                         return
                     }
+                    runCatching { onStatus(response.code) }
                     response.use {
                         when {
                             it.isSuccessful -> continuation.resume(it.body?.string())

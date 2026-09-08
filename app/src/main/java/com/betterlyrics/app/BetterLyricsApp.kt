@@ -31,6 +31,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import com.betterlyrics.app.media.ArtworkSearch
+import com.betterlyrics.app.settings.ArtworkSource
+import android.graphics.Bitmap
+import com.betterlyrics.app.media.TrackInfo
 
 /**
  * Hand-rolled container instead of a DI framework: there are eight objects, they are
@@ -75,6 +79,7 @@ class AppContainer(context: Context) {
     val updater = Updater(context, settings)
 
     private val spotifyExtras = SpotifyExtras(settings)
+    private val artworkSearch = ArtworkSearch()
 
     private val _extras = MutableStateFlow(NowPlayingExtras())
 
@@ -102,6 +107,17 @@ class AppContainer(context: Context) {
 
         // Warm the cache for whatever is queued next, when the player says what that is.
         scope.launch {
+            combine(
+                media.snapshot.map { it.track },
+                settings.settings.map { it.artworkSource },
+            ) { track, source -> track to source }
+                .distinctUntilChanged { old, new ->
+                    old.first?.cacheKey == new.first?.cacheKey && old.second == new.second
+                }
+                .collectLatest { (track, source) -> loadSearchedArtwork(track, source) }
+        }
+
+        scope.launch {
             media.snapshot
                 .map { it.nextTrack }
                 .distinctUntilChanged { old, new -> old?.cacheKey == new?.cacheKey }
@@ -123,6 +139,28 @@ class AppContainer(context: Context) {
                 // song that just ended gets applied to the one that just started.
                 .collectLatest { (trackId, _, _) -> loadExtras(trackId) }
         }
+    }
+
+    private val _searchedArtwork = MutableStateFlow<Bitmap?>(null)
+
+    /**
+     * A larger cover found by searching, when the player's own is small and a source is on.
+     *
+     * Separate from [extras] because it has nothing to do with Spotify and must keep working
+     * for someone who has pasted no tokens at all.
+     */
+    val searchedArtwork: StateFlow<Bitmap?> = _searchedArtwork.asStateFlow()
+
+    private suspend fun loadSearchedArtwork(track: TrackInfo?, source: ArtworkSource) {
+        _searchedArtwork.value = null
+        if (track == null || track.isEmpty || source == ArtworkSource.PLAYER) return
+        // Only worth a request when what the player gave us is not good enough.
+        if (!artworkSearch.wouldImproveOn(media.snapshot.value.artwork)) return
+
+        val found = runCatching { artworkSearch.find(track, source) }.getOrNull() ?: return
+        // The track may have changed while that was in flight.
+        if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
+        _searchedArtwork.value = found
     }
 
     private suspend fun loadExtras(trackId: String?) {

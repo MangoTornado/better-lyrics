@@ -81,6 +81,23 @@ enum class TranslationSource(val label: String) {
 }
 
 /**
+ * Where to look for cover art the player did not publish at a useful size.
+ *
+ * A media session's thumbnail is often 300px or less, which a full-screen background shows
+ * up for what it is. Both alternatives here are keyless and public.
+ */
+enum class ArtworkSource(val label: String) {
+    /** Only what the player publishes. No extra requests. */
+    PLAYER("Player only"),
+
+    /** Apple's public search. Fast, wide, and returns squares up to 1000px. */
+    ITUNES("iTunes"),
+
+    /** MusicBrainz then the Cover Art Archive. Slower, community-run, no rate key. */
+    COVER_ART_ARCHIVE("Cover Art Archive"),
+}
+
+/**
  * How a caching server of your own is used alongside the ordinary sources.
  *
  * Two modes because they answer different questions. [PARALLEL] is for filling the cache
@@ -240,6 +257,16 @@ data class Settings(
     val cacheServerUrl: String? = null,
     val cacheServerKey: String? = null,
     val cacheServerMode: CacheServerMode = CacheServerMode.PARALLEL,
+
+    /**
+     * A web access token copied out of Spotify's player, since the cookie route is closed.
+     *
+     * Short-lived by nature — an hour or so — so it lives with the developer options rather
+     * than being offered as something to set up and forget.
+     */
+    val spotifyWebToken: String? = null,
+
+    val artworkSource: ArtworkSource = ArtworkSource.PLAYER,
 ) {
     /** True when a cache server is configured and the developer options are on. */
     val cacheServerActive: Boolean
@@ -393,6 +420,8 @@ class SettingsStore(context: Context) : ProviderCredentials {
         cacheServerUrl = prefs.trimmed(KEY_CACHE_SERVER_URL),
         cacheServerKey = secrets.trimmed(KEY_CACHE_SERVER_KEY),
         cacheServerMode = prefs.enum(KEY_CACHE_SERVER_MODE, CacheServerMode.PARALLEL),
+        spotifyWebToken = secrets.trimmed(KEY_SP_WEB_TOKEN),
+        artworkSource = prefs.enum(KEY_ARTWORK_SOURCE, ArtworkSource.PLAYER),
     )
 
     /**
@@ -612,6 +641,14 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_CACHE_SERVER_KEY, value?.trim())
     }
 
+    fun updateSpotifyWebToken(value: String?) = editSecrets {
+        putString(KEY_SP_WEB_TOKEN, value?.trim())
+    }
+
+    fun setArtworkSource(value: ArtworkSource) = edit {
+        putString(KEY_ARTWORK_SOURCE, value.name)
+    }
+
     fun setCacheServerMode(value: CacheServerMode) = edit {
         putString(KEY_CACHE_SERVER_MODE, value.name)
     }
@@ -641,6 +678,9 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     // Null unless the developer options are on, so a URL left behind in preferences
     // cannot keep answering after the switch is turned off.
+    override val spotifyWebToken: String?
+        get() = current.spotifyWebToken?.takeIf { current.developerMode }
+
     override val cacheServerUrl: String?
         get() = current.cacheServerUrl?.takeIf { current.developerMode }
 
@@ -731,7 +771,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
             "sp_dc", "sp_access_token", "sp_access_token_expiry",
             "mxm_token", "mxm_user_token",
             "netease_cookie", "apple_dev_token", "apple_user_token",
-            "cache_server_key",
+            "cache_server_key", "sp_web_token",
         )
 
         const val KEY_SP_DC = "sp_dc"
@@ -749,6 +789,8 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_CACHE_SERVER_URL = "cache_server_url"
         const val KEY_CACHE_SERVER_KEY = "cache_server_key"
         const val KEY_CACHE_SERVER_MODE = "cache_server_mode"
+        const val KEY_SP_WEB_TOKEN = "sp_web_token"
+        const val KEY_ARTWORK_SOURCE = "artwork_source"
         const val KEY_NETEASE_COOKIE = "netease_cookie"
         const val KEY_APPLE_DEV_TOKEN = "apple_dev_token"
         const val KEY_APPLE_USER_TOKEN = "apple_user_token"

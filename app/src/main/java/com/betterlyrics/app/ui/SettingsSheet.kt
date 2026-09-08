@@ -71,6 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.betterlyrics.app.R
 import com.betterlyrics.app.update.UpdateChecker
 import com.betterlyrics.app.update.Updater
+import com.betterlyrics.app.settings.ArtworkSource
 
 /**
  * Whether the long-form explanations are showing.
@@ -280,6 +281,24 @@ fun SettingsSheet(
                 )
                 Help(
                     "Drives the phone's own music volume, not the player's mixer, so it moves with the hardware keys.",
+                )
+
+                ChipGroup(
+                    label = "Look for bigger cover art",
+                    options = ArtworkSource.entries.map { it to it.label },
+                    selected = settings.artworkSource,
+                    accent = accent,
+                    onSelect = { store.setArtworkSource(it) },
+                )
+                Help(
+                    "A media session's artwork is often 300 pixels or less — fine in a " +
+                        "notification, visibly soft behind full-screen lyrics. Both of these " +
+                        "are public and need no account: iTunes is one request and returns " +
+                        "squares up to 1000px; the Cover Art Archive is community-run, slower, " +
+                        "and reaches releases Apple does not carry. Either is only used when " +
+                        "what the player gave us is too small to look at, and a match that " +
+                        "does not look convincing is discarded — a wrong cover is worse than " +
+                        "a soft one.",
                 )
 
                 ToggleRow(
@@ -751,15 +770,12 @@ fun SettingsSheet(
 
                 SecretField(
                     label = "Spotify sp_dc cookie",
-                    help = "This no longer does anything, and nothing you paste will change " +
-                        "that. Getting a usable token from the cookie meant an endpoint that " +
-                        "Spotify has since closed: one address is blocked outright, the other " +
-                        "answers \u201cusage of this endpoint is not permitted under the " +
-                        "Spotify Developer Terms\u201d — with or without a cookie, so it is " +
-                        "not your session. Their own player still gets in by signing the " +
-                        "request with a secret from its JavaScript; working around that after " +
-                        "being told not to is not something this app will do. The field stays " +
-                        "in case they reopen it.",
+                    help = "No longer enough on its own. Turning the cookie into an access " +
+                        "token meant an endpoint Spotify has closed — one address is blocked " +
+                        "outright, the other refuses every caller with or without a cookie. " +
+                        "The endpoints that token opened are still there, though, so paste " +
+                        "the token itself under Developer instead. This field stays in case " +
+                        "the mint reopens.",
                     value = settings.spDcCookie.orEmpty(),
                     accent = accent,
                     onChange = { store.updateSpDcCookie(it) },
@@ -1089,6 +1105,33 @@ fun SettingsSheet(
                 )
 
                 if (settings.developerMode) {
+                    SecretField(
+                        label = "Spotify web access token",
+                        help = "Brings back Spotify's own lyrics, the artist image, the " +
+                            "full-size cover and the tempo — for about an hour, then it " +
+                            "expires and wants replacing.\n\nSpotify closed the endpoint that " +
+                            "turned a cookie into a token, but not the endpoints that token " +
+                            "opens: they answer \u201c401, bring a token\u201d rather than " +
+                            "\u201cno\u201d. So bring the token. Open open.spotify.com signed " +
+                            "in, developer tools, Network tab, play something, click any " +
+                            "request to spclient.wg.spotify.com, and copy the Authorization " +
+                            "header. Paste the whole thing — the \u201cBearer \u201d prefix is " +
+                            "stripped for you.\n\nIt is here rather than above because " +
+                            "something that lasts an hour is not a setting, it is an errand.",
+                        value = settings.spotifyWebToken.orEmpty(),
+                        accent = accent,
+                        onChange = { store.updateSpotifyWebToken(it) },
+                    )
+
+                    if (!settings.spotifyWebToken.isNullOrBlank()) {
+                        val spotify = container.providers.firstOrNull { it.id == "spotify" }
+                        Hint(
+                            spotify?.unavailableReason
+                                ?: "Accepted — Spotify's lyrics, artist image, cover and tempo " +
+                                    "are available until it expires.",
+                        )
+                    }
+
                     SecretField(
                         label = "Cache server URL",
                         help = "A server of your own that sits in front of the free sources and " +

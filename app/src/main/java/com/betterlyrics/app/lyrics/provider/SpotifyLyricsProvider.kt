@@ -20,11 +20,11 @@ import kotlinx.serialization.json.longOrNull
  * Spotify's own lyrics (`color-lyrics/v2`) — the exact same lines the Spotify app
  * shows, matched to the exact track that is playing rather than guessed from a title.
  *
- * **Unavailable.** It needed a web access token minted from the user's `sp_dc` cookie, and
- * Spotify has closed that off to everything but its own player — see
- * [SpotifyWebToken.BLOCKED_BY_SPOTIFY]. The provider reports itself unusable rather than
- * being asked on every track and failing quietly, and the code stays intact in case that
- * changes.
+ * Needs a web access token, and the only way to get one now is to copy it out of the web
+ * player: Spotify closed the endpoint that turned an `sp_dc` cookie into a token, but not the
+ * endpoints that token opens — `color-lyrics` still answers `401`, meaning "bring a token",
+ * rather than `403`. So a token pasted into the developer options works, for the hour or so
+ * until it expires. Without one the provider stays dormant and says why.
  */
 class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : LyricsProvider {
 
@@ -32,20 +32,37 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
     override val displayName = "Spotify"
 
     override val isConfigured: Boolean
-        get() = !SpotifyWebToken.BLOCKED_BY_SPOTIFY && !credentials.spDcCookie.isNullOrBlank()
+        get() = SpotifyWebToken.pasted(credentials) != null ||
+            (!SpotifyWebToken.BLOCKED_BY_SPOTIFY && !credentials.spDcCookie.isNullOrBlank())
 
     override val unavailableReason: String?
-        get() = SpotifyWebToken.BLOCKED_REASON.takeIf { SpotifyWebToken.BLOCKED_BY_SPOTIFY }
+        get() = when {
+            tokenRejected -> "The pasted access token has expired — copy a fresh one"
+            isConfigured -> null
+            !credentials.spotifyWebToken.isNullOrBlank() ->
+                "The pasted access token has expired — copy a fresh one"
+            else -> SpotifyWebToken.BLOCKED_REASON
+        }
+
+    /**
+     * Set when the endpoint refuses the token.
+     *
+     * A pasted token lasts about an hour and cannot be renewed from here, so its expiry is
+     * the normal end of its life rather than an error. Without noticing the `401` the app
+     * would report every track as having no Spotify lyrics, which points the user at the
+     * wrong problem entirely.
+     */
+    private var tokenRejected = false
 
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
             val trackId = request.spotifyTrackId ?: return@withContext null
-            if (credentials.spDcCookie.isNullOrBlank()) return@withContext null
 
             var token = SpotifyWebToken.get(credentials) ?: return@withContext null
             var document = colorLyrics(trackId, token, request)
-            if (document == null) {
-                // Force a token refresh once before giving up.
+            if (document == null && !tokenRejected) {
+                // Force a token refresh once before giving up. A pasted token cannot be
+                // refreshed, so this only helps the minted path.
                 token = SpotifyWebToken.refresh(credentials) ?: return@withContext null
                 document = colorLyrics(trackId, token, request)
             }
@@ -59,6 +76,8 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
     ): LyricsDocument? {
         val url = "https://spclient.wg.spotify.com/color-lyrics/v2/track/$trackId" +
             "?format=json&vocalRemoval=false&market=from_token"
+        // Tested against the live endpoint with a token copied from the player: these four
+        // headers are enough. The `client-token` the web player also sends is not required.
         val headers = mapOf(
             "Authorization" to "Bearer $token",
             "App-Platform" to "WebPlayer",
@@ -66,7 +85,9 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
             "Accept" to "application/json",
         )
 
-        return Http.get(url, headers) { body ->
+        return Http.get(url, headers, onStatus = { code ->
+            tokenRejected = code == 401 || code == 403
+        }) { body ->
             runCatching {
                 val lyrics = Json.parseToJsonElement(body).jsonObject["lyrics"]?.jsonObject
                     ?: return@runCatching null
