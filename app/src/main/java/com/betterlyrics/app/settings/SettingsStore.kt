@@ -267,10 +267,24 @@ data class Settings(
     val spotifyWebToken: String? = null,
 
     val artworkSource: ArtworkSource = ArtworkSource.PLAYER,
+
+    /**
+     * Let the cache server hold the artwork and tempo as well as the words.
+     *
+     * The reason to want this: a Spotify token lasts an hour and an Apple one a few months,
+     * but a cover URL and a tempo, once known, are true forever. Whenever a token does produce
+     * them the app hands them to the server, and from then on the server can answer for that
+     * track with no token at all.
+     */
+    val cacheServerExtras: Boolean = false,
 ) {
     /** True when a cache server is configured and the developer options are on. */
     val cacheServerActive: Boolean
         get() = developerMode && !cacheServerUrl.isNullOrBlank()
+
+    /** True when that server should also hold the artwork and the tempo. */
+    val cacheServerExtrasActive: Boolean
+        get() = cacheServerActive && cacheServerExtras
 
     companion object {
         val DEFAULT_PROVIDER_ORDER = listOf(
@@ -437,6 +451,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         cacheServerMode = prefs.enum(KEY_CACHE_SERVER_MODE, CacheServerMode.PARALLEL),
         spotifyWebToken = secrets.trimmed(KEY_SP_WEB_TOKEN),
         artworkSource = prefs.enum(KEY_ARTWORK_SOURCE, ArtworkSource.PLAYER),
+        cacheServerExtras = prefs.getBoolean(KEY_CACHE_SERVER_EXTRAS, false),
     )
 
     /**
@@ -660,6 +675,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_SP_WEB_TOKEN, value?.trim())
     }
 
+    fun setCacheServerExtras(value: Boolean) = edit {
+        putBoolean(KEY_CACHE_SERVER_EXTRAS, value)
+    }
+
     fun setArtworkSource(value: ArtworkSource) = edit {
         putString(KEY_ARTWORK_SOURCE, value.name)
     }
@@ -806,6 +825,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_CACHE_SERVER_MODE = "cache_server_mode"
         const val KEY_SP_WEB_TOKEN = "sp_web_token"
         const val KEY_ARTWORK_SOURCE = "artwork_source"
+        const val KEY_CACHE_SERVER_EXTRAS = "cache_server_extras"
         const val KEY_NETEASE_COOKIE = "netease_cookie"
         const val KEY_APPLE_DEV_TOKEN = "apple_dev_token"
         const val KEY_APPLE_USER_TOKEN = "apple_user_token"

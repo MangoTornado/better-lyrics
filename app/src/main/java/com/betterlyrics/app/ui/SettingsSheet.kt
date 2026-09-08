@@ -1189,6 +1189,28 @@ fun SettingsSheet(
                             "up again\u201d above when you want to force a fresh request.",
                     )
 
+                    ToggleRow(
+                        title = "Cache the artwork and tempo too",
+                        subtitle = "Not just the words — and contributes what your tokens find",
+                        checked = settings.cacheServerExtras,
+                        accent = accent,
+                        onCheckedChange = { store.setCacheServerExtras(it) },
+                    )
+                    Help(
+                        "The reason to want this: a Spotify token lasts an hour and an Apple " +
+                            "one a few months, but a cover URL and a tempo, once known, are " +
+                            "true forever. Whenever a token does produce them the app hands " +
+                            "them to your server, and from then on the server can answer for " +
+                            "that track with no token at all — on this phone after the token " +
+                            "expires, and for every track it never played with one in " +
+                            "hand.\n\nOnly what was learned is sent: the track's identity and " +
+                            "the URLs. Never a credential, and never the images themselves — " +
+                            "the server fetches those itself, which is a smaller payload and " +
+                            "the only way it ends up holding its own copy. Tempo comes from " +
+                            "Spotify alone, so this is the only way to have it without a live " +
+                            "token.",
+                    )
+
                     if (settings.cacheServerUrl.isNullOrBlank()) {
                         Hint("No URL set, so the cache server is not being asked.")
                     }

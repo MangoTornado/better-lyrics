@@ -37,6 +37,8 @@ import android.graphics.Bitmap
 import com.betterlyrics.app.media.TrackInfo
 import com.betterlyrics.app.media.AppleArtwork
 import com.betterlyrics.app.media.APPLE_IMAGE_SIZE
+import com.betterlyrics.app.media.CacheServerExtras
+import com.betterlyrics.app.media.CachedExtras
 
 /**
  * Hand-rolled container instead of a DI framework: there are eight objects, they are
@@ -82,6 +84,7 @@ class AppContainer(context: Context) {
 
     private val spotifyExtras = SpotifyExtras(settings)
     private val appleArtwork = AppleArtwork(settings)
+    private val cacheServerExtras = CacheServerExtras(settings)
     private val artworkSearch = ArtworkSearch()
 
     private val _extras = MutableStateFlow(NowPlayingExtras())
@@ -160,6 +163,9 @@ class AppContainer(context: Context) {
         // A token beats a title search, so do not spend a request competing with one. This is
         // also why the search is a separate flow: it must not wait on Spotify to find out.
         if (spotifyExtras.isAvailable || appleArtwork.isAvailable) return
+        // And for the server, which may be holding Spotify's own artwork from a day when
+        // somebody had a token.
+        if (settings.current.cacheServerExtrasActive) return
         // Only worth a request when what the player gave us is not good enough.
         if (!artworkSearch.wouldImproveOn(media.snapshot.value.artwork)) return
 
@@ -179,7 +185,8 @@ class AppContainer(context: Context) {
      */
     private suspend fun loadExtras(trackId: String?) {
         _extras.value = NowPlayingExtras()
-        if (!settings.current.useSpotifyExtras) return
+        val settingsNow = settings.current
+        if (!settingsNow.useSpotifyExtras) return
         val track = media.snapshot.value.track
 
         if (trackId != null) {
@@ -205,22 +212,75 @@ class AppContainer(context: Context) {
                     cover = cover,
                     tempo = details.tempo,
                 )
-                if (cover != null || artist != null) return
+                if (cover != null || artist != null) {
+                    // The server can hold this for the hour after the token dies, and for
+                    // every other track this phone never plays with a token in hand.
+                    track?.let {
+                        contribute(
+                            it,
+                            CachedExtras(details.coverUrl, details.artistImageUrl, details.tempo),
+                            "spotify",
+                        )
+                    }
+                    return
+                }
             }
         }
 
-        // Nothing from Spotify — no token, no match, or an expired token. Apple next.
-        if (track == null || !appleArtwork.isAvailable) return
-        val images = runCatching { appleArtwork.imagesFor(track) }.getOrNull() ?: return
-        val cover = images.coverUrl?.let { url ->
-            runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
+        if (track == null) return
+
+        // Nothing from Spotify — no token, no match, or an expired token. Apple next: it can
+        // only match on name, but its token lasts months rather than an hour.
+        if (appleArtwork.isAvailable) {
+            val images = runCatching { appleArtwork.imagesFor(track) }.getOrNull()
+            if (images != null) {
+                val cover = images.coverUrl?.let { url ->
+                    runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
+                }
+                val artist = images.artistImageUrl?.let { url ->
+                    runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
+                }
+                if (cover != null || artist != null) {
+                    if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
+                    _extras.value = _extras.value.copy(artistImage = artist, cover = cover)
+                    contribute(
+                        track,
+                        CachedExtras(images.coverUrl, images.artistImageUrl, null),
+                        "applemusic",
+                    )
+                    return
+                }
+            }
         }
-        val artist = images.artistImageUrl?.let { url ->
-            runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
+
+        // No token at all. Whatever the server was told last time somebody did have one.
+        if (!settingsNow.cacheServerExtrasActive) return
+        val cached = runCatching { cacheServerExtras.fetch(track) }.getOrNull() ?: return
+        val cover = cached.coverUrl?.let { url ->
+            runCatching { cacheServerExtras.image(url) }.getOrNull()
         }
-        if (cover == null && artist == null) return
+        val artist = cached.artistImageUrl?.let { url ->
+            runCatching { cacheServerExtras.image(url) }.getOrNull()
+        }
+        if (cover == null && artist == null && cached.tempo == null) return
         if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
-        _extras.value = _extras.value.copy(artistImage = artist, cover = cover)
+        _extras.value = NowPlayingExtras(
+            trackId = trackId,
+            artistImage = artist,
+            cover = cover,
+            tempo = cached.tempo,
+        )
+    }
+
+    /**
+     * Hand what a token produced to the cache server, if one is configured to take it.
+     *
+     * Fire and forget: a contribution that fails costs nothing, and waiting on it would make
+     * the app slower for the benefit of some later playback.
+     */
+    private fun contribute(track: TrackInfo, extras: CachedExtras, source: String) {
+        if (!settings.current.cacheServerExtrasActive) return
+        scope.launch { cacheServerExtras.contribute(track, extras, source) }
     }
 }
 

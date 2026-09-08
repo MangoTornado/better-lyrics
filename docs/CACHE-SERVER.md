@@ -108,6 +108,74 @@ a misconfigured server, or something in front of it, answering `200` with an err
 lyric line reading "502 Bad Gateway" is worse than finding nothing. Plain text with no
 timestamps *is* accepted, because unsynced lyrics are a real answer.
 
+## Artwork and tempo
+
+Optional, and behind its own switch — **Developer → Cache the artwork and tempo too**. Off,
+none of this is called.
+
+The reason it exists: a Spotify access token is good for about an hour and an Apple developer
+token for a few months, but a cover URL and a tempo, once known, are true forever. So the
+server becomes the thing that outlives the tokens.
+
+### Reading
+
+```
+GET {baseUrl}/v1/extras?title=…&artist=…&album=…&durationMs=…&spotifyId=…
+```
+
+Same parameters and same `Authorization: Bearer <key>` as the lyrics lookup. Answer:
+
+```json
+{
+  "coverUrl": "https://…/cover.jpg",
+  "artistImageUrl": "https://…/artist.jpg",
+  "tempo": 87.5
+}
+```
+
+- Every field is optional; an answer with none of them is the same as a 404.
+- `cover` and `artistImage` are accepted as aliases, and a `data` wrapper is allowed, as with
+  the lyrics.
+- The URLs may point anywhere — including back at the server, which is how it serves a copy it
+  holds rather than a link to somebody else's.
+- `tempo` is beats per minute. It paces the animated background; nothing else uses it.
+- Only asked when no token can answer. A live Spotify or Apple token beats the cache, because
+  it is about the track playing now rather than a record of one that matched before.
+
+### Writing
+
+```
+POST {baseUrl}/v1/extras
+Content-Type: application/json
+```
+
+```json
+{
+  "title": "Lemon",
+  "artist": "Kenshi Yonezu",
+  "album": "Lemon",
+  "durationMs": 255000,
+  "spotifyId": "7Cd17G3oNQ34OWUwS8ZxfR",
+  "coverUrl": "https://i.scdn.co/image/…",
+  "artistImageUrl": "https://i.scdn.co/image/…",
+  "tempo": 87.5,
+  "source": "spotify"
+}
+```
+
+Sent once per track per run, whenever a token produced something. `source` is `spotify` or
+`applemusic`.
+
+**What the server should do with it:** fetch those URLs and keep its own copy, then serve that
+copy from `/v1/extras`. Storing the upstream URL alone mostly works and then quietly stops —
+Spotify's image CDN links are stable, Apple's templates less so, and neither is a promise.
+
+**What is deliberately not sent:** any credential, and the image bytes. The server fetching
+the URLs itself is both a smaller request and the only way it ends up holding the file.
+
+Any non-2xx is fine. The app logs it and carries on: a contribution that fails costs nothing,
+and waiting on one would make the app slower for the benefit of a later playback.
+
 ## What the app does with it
 
 In **Alongside the others** mode the server is asked first, in parallel with every enabled
