@@ -12,6 +12,32 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+/**
+ * Read the server's answer.
+ *
+ * Top-level so it can be tested against a response a real server actually sent — the two sides
+ * of this contract live in different repositories, and a field renamed on one of them is
+ * indistinguishable from a track the server has never seen.
+ *
+ * Tolerant by design: `cover` and `artistImage` are accepted as aliases, and the fields may sit
+ * at the top level or inside a `data` wrapper. The server also returns `isrc`, `palette`,
+ * `analysis` and `metadata`, which nothing here reads yet — ignoring an unknown field has to be
+ * free, or every addition on the server becomes a breaking change.
+ */
+internal fun parseCachedExtras(body: String): CachedExtras? = runCatching {
+    val root = Json.parseToJsonElement(body).jsonObject
+    val data = root["data"]?.jsonObject ?: root
+    CachedExtras(
+        coverUrl = data.extrasString("coverUrl") ?: data.extrasString("cover"),
+        artistImageUrl = data.extrasString("artistImageUrl") ?: data.extrasString("artistImage"),
+        tempo = data["tempo"]?.jsonPrimitive?.floatOrNull?.takeIf { it > 0f },
+    ).takeIf { it.coverUrl != null || it.artistImageUrl != null || it.tempo != null }
+}.getOrNull()
+
+private fun kotlinx.serialization.json.JsonObject.extrasString(key: String): String? =
+    runCatching { get(key)?.jsonPrimitive?.contentOrNull }.getOrNull()
+        ?.takeIf { it.isNotBlank() }
+
 /** What a cache server knows about a track besides its words. */
 data class CachedExtras(
     val coverUrl: String? = null,
@@ -64,15 +90,7 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
         }.getOrNull()
     }
 
-    private fun parse(body: String): CachedExtras? = runCatching {
-        val root = Json.parseToJsonElement(body).jsonObject
-        val data = root["data"]?.jsonObject ?: root
-        CachedExtras(
-            coverUrl = data.string("coverUrl") ?: data.string("cover"),
-            artistImageUrl = data.string("artistImageUrl") ?: data.string("artistImage"),
-            tempo = data["tempo"]?.jsonPrimitive?.floatOrNull?.takeIf { it > 0f },
-        ).takeIf { it.coverUrl != null || it.artistImageUrl != null || it.tempo != null }
-    }.getOrNull()
+    private fun parse(body: String): CachedExtras? = parseCachedExtras(body)
 
     private fun query(track: TrackInfo): String = buildString {
         append("title=").append(Http.encode(track.title))
@@ -88,9 +106,6 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
         return json + ("Authorization" to "Bearer $key")
     }
 
-    private fun kotlinx.serialization.json.JsonObject.string(key: String): String? =
-        runCatching { get(key)?.jsonPrimitive?.contentOrNull }.getOrNull()
-            ?.takeIf { it.isNotBlank() }
 
     private companion object {
         const val CACHE_SIZE = 8
