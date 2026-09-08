@@ -27,6 +27,7 @@ import com.betterlyrics.app.lyrics.model.LyricLine
 import com.betterlyrics.app.lyrics.model.LyricsDocument
 import com.betterlyrics.app.settings.FuriganaMode
 import com.betterlyrics.app.settings.Settings
+import com.betterlyrics.app.settings.TranslationSource
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
@@ -87,7 +88,9 @@ fun LyricsView(
             settings.furigana == FuriganaMode.KATAKANA -> false
             else -> null
         }
-        val showTranslation = settings.showTranslation && !tight
+        // Either source ends up in the same place: a smaller row under the line. The
+        // difference between them is who wrote the text, which is settled by now.
+        val showTranslation = settings.translationSource != TranslationSource.OFF && !tight
         val showCredits = settings.showCredits && !tight
 
         val metrics = remember(fontSizePx, settings.simpleMode, showTranslation, settings.font, tight) {

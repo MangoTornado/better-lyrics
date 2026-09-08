@@ -15,6 +15,7 @@ import com.betterlyrics.app.lyrics.translate.LyricsTranslator
 import com.betterlyrics.app.media.TrackInfo
 import com.betterlyrics.app.settings.Settings
 import com.betterlyrics.app.settings.SettingsStore
+import com.betterlyrics.app.settings.TranslationSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -84,6 +85,11 @@ class LyricsRepository(
     private var fetchJob: Job? = null
     private var currentRequest: LyricsRequest? = null
 
+    private var prefetchJob: Job? = null
+
+    /** So a queue that keeps re-publishing does not re-run the same lookup. */
+    private var prefetchedKey: String? = null
+
     val state: StateFlow<LyricsState> =
         combine(base, settingsStore.settings, translating) { base, settings, isTranslating ->
             Triple(base, settings, isTranslating)
@@ -100,16 +106,16 @@ class LyricsRepository(
 
     // ---- track lifecycle ----------------------------------------------------
 
+    private fun TrackInfo.toRequest() = LyricsRequest(
+        title = title,
+        artist = artist,
+        album = album,
+        durationMs = durationMs,
+        spotifyTrackId = spotifyTrackId,
+    )
+
     fun setTrack(track: TrackInfo?) {
-        val request = track?.takeIf { !it.isEmpty }?.let {
-            LyricsRequest(
-                title = it.title,
-                artist = it.artist,
-                album = it.album,
-                durationMs = it.durationMs,
-                spotifyTrackId = it.spotifyTrackId,
-            )
-        }
+        val request = track?.takeIf { !it.isEmpty }?.toRequest()
 
         if (request?.cacheIdentity() == currentRequest?.cacheIdentity()) return
 
@@ -125,6 +131,47 @@ class LyricsRepository(
         base.value = Base.Loading
         fetchJob = scope.launch { fetchBase(request) }
     }
+
+    /**
+     * Look up the next track in the queue now, so it is already cached when it starts.
+     *
+     * Worth doing because the cache is what makes this app work offline and what keeps it
+     * from hammering volunteer-run endpoints: one query per track, ideally before you ever
+     * need it. It is best-effort in every direction — no state is published, failures are
+     * silent, and it waits for the track actually on screen to finish resolving first so
+     * it never competes with it for bandwidth.
+     */
+    fun prefetchNext(track: TrackInfo?) {
+        if (!settingsStore.current.prefetchNextTrack) return
+        val next = track?.takeIf { !it.isEmpty } ?: return
+        if (!next.isPrefetchable) return
+
+        val request = next.toRequest()
+        if (!request.isUsable) return
+
+        val key = request.cacheIdentity()
+        if (key == currentRequest?.cacheIdentity() || key == prefetchedKey) return
+
+        prefetchJob?.cancel()
+        prefetchedKey = key
+        prefetchJob = scope.launch {
+            // The track on screen comes first, always.
+            fetchJob?.join()
+            if (currentRequest?.cacheIdentity() == key) return@launch
+            if (cache.get(key) != null || !isOnline()) return@launch
+            if (localStore.fetch(request) != null) return@launch
+
+            val answer = query(request)
+            // Only a hit is worth keeping. A miss here may say more about the thin
+            // metadata a queue entry carries than about the track, and caching it would
+            // mean the real lookup never happens.
+            if (answer is Query.Answered && answer.document != null) {
+                cache.put(key, answer.document)
+                Log.d(TAG, "prefetched ${request.title}")
+            }
+        }
+    }
+
 
     fun retry() {
         val request = currentRequest ?: return
@@ -197,6 +244,32 @@ class LyricsRepository(
             return
         }
 
+        when (val answer = query(request)) {
+            is Query.Broke -> base.value = Base.Failed(answer.message)
+            is Query.Answered -> {
+                cache.put(key, answer.document)
+                base.value = answer.document
+                    ?.let { Base.Ready(key, it) }
+                    ?: Base.NotFound
+            }
+        }
+    }
+
+    private sealed interface Query {
+        /** The providers were asked and this is what they had, null included. */
+        data class Answered(val document: LyricsDocument?) : Query
+
+        /** The lookup itself failed, which is not the same as the track having no lyrics. */
+        data class Broke(val message: String) : Query
+    }
+
+    /**
+     * Asks every configured provider at once and keeps the best answer.
+     *
+     * Touches no state, so it serves both the track on screen and the one queued behind
+     * it.
+     */
+    private suspend fun query(request: LyricsRequest): Query {
         val settings = settingsStore.current
         val enabled = settings.providerOrder
             .filter { it in settings.enabledProviders && it != localStore.id }
@@ -205,10 +278,7 @@ class LyricsRepository(
             // nothing to leave enabled while you go and find the token.
             .filter { it.isConfigured }
 
-        if (enabled.isEmpty()) {
-            base.value = Base.NotFound
-            return
-        }
+        if (enabled.isEmpty()) return Query.Answered(null)
 
         val results = try {
             coroutineScope {
@@ -229,21 +299,19 @@ class LyricsRepository(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            base.value = Base.Failed(e.message ?: "Lookup failed")
-            return
+            return Query.Broke(e.message ?: "Lookup failed")
         }
 
-        val best = results.mapNotNull { (id, document) -> document?.let { id to it } }
-            .maxWithOrNull(
-                compareBy(
-                    { (_, document) -> qualityScore(document) },
-                    // Earlier in the user's order wins a tie.
-                    { (id, _) -> -settings.providerOrder.indexOf(id) },
-                ),
-            )?.second
-
-        cache.put(key, best)
-        base.value = if (best == null) Base.NotFound else Base.Ready(key, best)
+        return Query.Answered(
+            results.mapNotNull { (id, document) -> document?.let { id to it } }
+                .maxWithOrNull(
+                    compareBy(
+                        { (_, document) -> qualityScore(document) },
+                        // Earlier in the user's order wins a tie.
+                        { (id, _) -> -settings.providerOrder.indexOf(id) },
+                    ),
+                )?.second,
+        )
     }
 
     /**
@@ -277,7 +345,10 @@ class LyricsRepository(
             document = deriveAnnotated(ready.key, document, settings)
         }
 
-        if (settings.showTranslation) {
+        // Only the on-device source derives anything. "From the source" is a display
+        // decision about text the document already carries, so it costs nothing here —
+        // no model, no download, no work on a track that has no translation anyway.
+        if (settings.translationSource == TranslationSource.DEVICE) {
             document = deriveTranslated(ready.key, document, settings)
         }
 
@@ -314,9 +385,6 @@ class LyricsRepository(
         document: LyricsDocument,
         settings: Settings,
     ): LyricsDocument {
-        if (document.lines.all { !it.translated.isNullOrBlank() || it.isInterlude }) {
-            return document
-        }
         val cacheKey = "$key|tr|${settings.translationTarget}|" +
             settings.romanizationStripsDiacritics + settings.showRomanization
         derived[cacheKey]?.let { return it }
@@ -327,6 +395,9 @@ class LyricsRepository(
                 document = document,
                 targetTag = settings.translationTarget,
                 requireWifi = settings.translationWifiOnly,
+                // The user picked this language; a Chinese translation shipped with a
+                // Japanese song does not satisfy a request for English.
+                replaceProvided = true,
             )
         } finally {
             translating.value = false

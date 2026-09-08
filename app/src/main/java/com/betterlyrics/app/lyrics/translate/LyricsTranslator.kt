@@ -27,8 +27,10 @@ import kotlin.coroutines.resumeWithException
  * cost is a one-off ~30 MB model download per language pair, so nothing is fetched
  * until the user turns translation on.
  *
- * A translation the provider already supplied always wins — a human translation of a
- * lyric beats machine translation of it, every time.
+ * By default a translation the provider already supplied wins — a human translation of a
+ * lyric beats machine translation of it, every time. The exception is when the user has
+ * explicitly asked for on-device translation: the provider's may be in a language they do
+ * not read, and honouring it would mean the setting appeared to do nothing.
  */
 class LyricsTranslator {
 
@@ -45,17 +47,23 @@ class LyricsTranslator {
      *
      * Returns the document unchanged when there is nothing to do: no source language,
      * source already matches the target, or the model is unavailable offline.
+     *
+     * @param replaceProvided translate every line, including ones that arrived with a
+     *   translation already. What "On this device" means: the target language is the
+     *   user's choice, not the transcriber's.
      */
     suspend fun translate(
         document: LyricsDocument,
         targetTag: String,
         requireWifi: Boolean,
+        replaceProvided: Boolean = false,
         onState: (State) -> Unit = {},
     ): LyricsDocument {
-        val untranslated = document.lines.filter {
-            !it.isInterlude && it.text.isNotBlank() && it.translated.isNullOrBlank()
+        val outstanding = document.lines.filter {
+            !it.isInterlude && it.text.isNotBlank() &&
+                (replaceProvided || it.translated.isNullOrBlank())
         }
-        if (untranslated.isEmpty()) return document
+        if (outstanding.isEmpty()) return document
 
         val sourceTag = document.language
             ?: detectScript(document.lines.joinToString("\n") { it.text }).languageTag()
@@ -89,9 +97,8 @@ class LyricsTranslator {
                 coroutineScope {
                     document.lines.map { line ->
                         async {
-                            if (line.isInterlude || line.text.isBlank() ||
-                                !line.translated.isNullOrBlank()
-                            ) {
+                            val alreadyDone = !replaceProvided && !line.translated.isNullOrBlank()
+                            if (line.isInterlude || line.text.isBlank() || alreadyDone) {
                                 return@async line
                             }
                             val result = gate.withPermit {

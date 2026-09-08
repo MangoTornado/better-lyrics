@@ -117,8 +117,11 @@ fun WelcomeSheet(
                     "•  LRCLIB — open community database\n" +
                     "•  Musixmatch — word-by-word for most Western music\n" +
                     "•  NetEase — word-by-word for East Asian music, with hand-checked " +
-                    "romanization and translation\n\nYou can also import your own .lrc or " +
-                    ".ttml file for any track, which always wins.",
+                    "romanization and translation\n\nTranslations that come with the lyrics " +
+                    "are shown as they are. Translating into a language of your own choosing " +
+                    "is a separate setting, because it runs a model on the phone and has to " +
+                    "download it first.\n\nYou can also import your own .lrc or .ttml file " +
+                    "for any track, which always wins.",
                 accent = accent,
             )
 

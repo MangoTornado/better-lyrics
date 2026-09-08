@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
@@ -178,6 +179,41 @@ class MediaSessionRepository(private val context: Context) {
     private fun MediaController.isPlayingNow(): Boolean =
         playbackState?.state == PlaybackState.STATE_PLAYING
 
+    /**
+     * The queue entry after the one playing.
+     *
+     * Every step here can fail on a real player, and each failure is a null rather than a
+     * guess: a queue may be absent (Spotify publishes none), stale, or published without
+     * saying which item is active. Prefetching the wrong song would write a wrong answer
+     * into the cache under its key, which is worse than not prefetching at all.
+     */
+    private fun MediaController.nextInQueue(): TrackInfo? {
+        val items = runCatching { queue }.getOrNull()?.takeIf { it.size > 1 } ?: return null
+        val activeId = playbackState?.activeQueueItemId ?: return null
+        if (activeId == MediaSession.QueueItem.UNKNOWN_ID.toLong()) return null
+
+        val index = items.indexOfFirst { it.queueId == activeId }
+        if (index < 0) return null
+        val next = items.getOrNull(index + 1)?.description ?: return null
+
+        val title = next.title?.toString()?.trim().orEmpty()
+        if (title.isEmpty()) return null
+        return TrackInfo(
+            title = title,
+            // A queue entry has a subtitle, not an artist field; players put the artist
+            // there. Album and duration are simply not published, and the lyrics lookup
+            // treats both as unknown rather than as blank.
+            artist = next.subtitle?.toString()?.trim().orEmpty(),
+            album = "",
+            durationMs = next.extras
+                ?.getLong(MediaMetadata.METADATA_KEY_DURATION, 0L)
+                ?.coerceAtLeast(0L) ?: 0L,
+            mediaId = next.mediaId,
+            artworkUri = next.iconUri?.toString(),
+            packageName = packageName,
+        )
+    }
+
     private fun MediaController.toSnapshot(): PlayerSnapshot {
         val md = metadata
         val state = playbackState
@@ -217,6 +253,7 @@ class MediaSessionRepository(private val context: Context) {
             track = track,
             playback = playback,
             artwork = art,
+            nextTrack = nextInQueue(),
             sourcePackage = packageName,
             sourceLabel = appLabel(packageName),
             canControl = state != null,
@@ -290,6 +327,10 @@ class MediaSessionRepository(private val context: Context) {
     private inner class ControllerWatcher(private val controller: MediaController) {
         private val callback = object : MediaController.Callback() {
             override fun onMetadataChanged(metadata: MediaMetadata?) = publish()
+
+            // The queue usually arrives after the metadata does, and changes whenever the
+            // user reorders it, so the next track is only known by listening for it.
+            override fun onQueueChanged(queue: MutableList<MediaSession.QueueItem>?) = publish()
 
             override fun onPlaybackStateChanged(state: PlaybackState?) {
                 if (state?.state == PlaybackState.STATE_PLAYING) {

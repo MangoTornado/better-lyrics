@@ -36,6 +36,19 @@ data class TrackInfo(
             }
 
     val isEmpty: Boolean get() = title.isBlank() && artist.isBlank()
+
+    /**
+     * Whether this track — read from a player's queue rather than from what is playing —
+     * can be looked up now and found again later under the same [cacheKey].
+     *
+     * A queue entry publishes far less than the metadata of a playing track: usually a
+     * title and an artist, and no duration. `title|artist|0` is not the key the same track
+     * gets once it starts and its real duration is known, so prefetching it would spend
+     * the request and never be read back. A Spotify id or a duration makes the two keys
+     * agree; without either, the honest answer is not to bother.
+     */
+    val isPrefetchable: Boolean
+        get() = title.isNotBlank() && (spotifyTrackId != null || durationMs > 0)
 }
 
 data class PlaybackPosition(
@@ -70,6 +83,14 @@ data class PlayerSnapshot(
     val sourcePackage: String? = null,
     val sourceLabel: String? = null,
     val canControl: Boolean = false,
+    /**
+     * The track queued after this one, when the player publishes a queue at all.
+     *
+     * Only used to warm the lyrics cache ahead of time. Most players publish nothing
+     * here — Spotify among them — so anything depending on it must treat null as the
+     * normal case.
+     */
+    val nextTrack: TrackInfo? = null,
 ) {
     val hasTrack: Boolean get() = track != null && !track.isEmpty
 }

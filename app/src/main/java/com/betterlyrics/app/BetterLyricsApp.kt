@@ -92,6 +92,14 @@ class AppContainer(context: Context) {
                 .collect { track -> lyrics.setTrack(track) }
         }
 
+        // Warm the cache for whatever is queued next, when the player says what that is.
+        scope.launch {
+            media.snapshot
+                .map { it.nextTrack }
+                .distinctUntilChanged { old, new -> old?.cacheKey == new?.cacheKey }
+                .collect { next -> lyrics.prefetchNext(next) }
+        }
+
         scope.launch {
             media.snapshot
                 .map { it.track?.spotifyTrackId }

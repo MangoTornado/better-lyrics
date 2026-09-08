@@ -77,6 +77,7 @@ import com.betterlyrics.app.ui.components.MediaPanel
 import com.betterlyrics.app.ui.components.NowBar
 import com.betterlyrics.app.ui.components.VolumeRow
 import com.betterlyrics.app.ui.lyrics.LyricsView
+import com.betterlyrics.app.settings.TranslationSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -199,9 +200,7 @@ fun PlayerScreen(
                         onToggleRomanization = {
                             container.settings.setShowRomanization(!settings.showRomanization)
                         },
-                        onToggleTranslation = {
-                            container.settings.setShowTranslation(!settings.showTranslation)
-                        },
+                        onToggleTranslation = { container.settings.toggleTranslation() },
                         onToggleCinema = { container.settings.toggleViewMode() },
                         onSwapSide = { container.settings.toggleMediaPanelSide() },
                         onEnterPopup = onEnterPopup,
@@ -677,7 +676,18 @@ private fun ViewControls(
             if (romanizationAvailable) {
                 LabelChip("文A", "Toggle romanization", settings.showRomanization, accent, onToggleRomanization)
             }
-            ActionChip(AppIcons.Translate, "Toggle translation", settings.showTranslation, accent, onToggleTranslation)
+            ActionChip(
+                AppIcons.Translate,
+                // Which source is in use is a Settings decision; here it is on or off.
+                when (settings.translationSource) {
+                    TranslationSource.OFF -> "Show translation"
+                    TranslationSource.PROVIDER -> "Translation from the source — tap to hide"
+                    TranslationSource.DEVICE -> "Translation on this device — tap to hide"
+                },
+                settings.translationSource != TranslationSource.OFF,
+                accent,
+                onToggleTranslation,
+            )
             ActionChip(
                 AppIcons.Cinema,
                 "Cinema view",

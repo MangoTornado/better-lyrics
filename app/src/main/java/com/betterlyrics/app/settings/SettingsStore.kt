@@ -61,6 +61,25 @@ enum class FuriganaMode(val label: String) {
     KATAKANA("Katakana"),
 }
 
+/**
+ * Where a translation comes from, which is the whole question.
+ *
+ * The two are not interchangeable and were never worth hiding behind one switch. A
+ * provider translation was written by a person, arrives with the lyrics, costs nothing and
+ * works offline — but it is in whatever language that person chose. An on-device one is
+ * machine output in the language *you* chose, and costs a one-off ~30 MB model download
+ * per language pair.
+ */
+enum class TranslationSource(val label: String) {
+    OFF("Off"),
+
+    /** Only what came with the lyrics. Never downloads anything, never guesses. */
+    PROVIDER("From the source"),
+
+    /** ML Kit, into [Settings.translationTarget], ignoring what the source supplied. */
+    DEVICE("On this device"),
+}
+
 /** Which half of the screen the album art and track info occupy in Cinema view. */
 enum class MediaPanelSide(val label: String) {
     /** Left in landscape, top in portrait. */
@@ -151,7 +170,7 @@ data class Settings(
     val romanizationStripsDiacritics: Boolean = false,
     /** Only applies while romanization is off — the gloss belongs over the original text. */
     val furigana: FuriganaMode = FuriganaMode.OFF,
-    val showTranslation: Boolean = false,
+    val translationSource: TranslationSource = TranslationSource.PROVIDER,
     val translationTarget: String = "en",
     val translationWifiOnly: Boolean = true,
 
@@ -165,6 +184,14 @@ data class Settings(
     val popupShowArtwork: Boolean = true,
 
     // ---- providers -------------------------------------------------------
+    /**
+     * Look the next queued track up before it starts.
+     *
+     * Only possible when the player publishes a queue, which most do not, so this is free
+     * where it does nothing and worth it where it works: the lyrics are on screen the
+     * instant the track changes, and it works with no signal.
+     */
+    val prefetchNextTrack: Boolean = true,
     val enabledProviders: Set<String> = DEFAULT_ENABLED_PROVIDERS,
     val providerOrder: List<String> = DEFAULT_PROVIDER_ORDER,
 
@@ -245,7 +272,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         showRomanization = prefs.getBoolean(KEY_ROMANIZE, true),
         romanizationStripsDiacritics = prefs.getBoolean(KEY_STRIP_DIACRITICS, false),
         furigana = prefs.enum(KEY_FURIGANA, FuriganaMode.OFF),
-        showTranslation = prefs.getBoolean(KEY_TRANSLATE, false),
+        translationSource = prefs.translationSource(),
         translationTarget = prefs.getString(KEY_TRANSLATE_TARGET, "en") ?: "en",
         translationWifiOnly = prefs.getBoolean(KEY_TRANSLATE_WIFI, true),
 
@@ -254,6 +281,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         popupShape = prefs.enum(KEY_POPUP_SHAPE, PopupShape.LANDSCAPE),
         popupShowArtwork = prefs.getBoolean(KEY_POPUP_ARTWORK, true),
 
+        prefetchNextTrack = prefs.getBoolean(KEY_PREFETCH_NEXT, true),
         enabledProviders = prefs.getStringSet(KEY_PROVIDERS_ON, null)
             ?: Settings.DEFAULT_ENABLED_PROVIDERS,
         providerOrder = prefs.getString(KEY_PROVIDER_ORDER, null)
@@ -275,6 +303,26 @@ class SettingsStore(context: Context) : ProviderCredentials {
         appleMusicUserToken = prefs.trimmed(KEY_APPLE_USER_TOKEN),
         appleStorefront = prefs.trimmed(KEY_APPLE_STOREFRONT) ?: "us",
     )
+
+    /**
+     * Reads the source, migrating the single boolean this used to be.
+     *
+     * That switch only ever enabled the machine translator, so someone who had turned it
+     * on wanted [TranslationSource.DEVICE]. Someone who had left it off was declining a
+     * 30 MB download, not declining the free human translations that came with their
+     * lyrics — there was no way to ask for those separately — so they land on
+     * [TranslationSource.PROVIDER] along with everybody new.
+     */
+    private fun SharedPreferences.translationSource(): TranslationSource {
+        getString(KEY_TRANSLATE_SOURCE, null)?.let { stored ->
+            runCatching { return enumValueOf<TranslationSource>(stored) }
+        }
+        return if (getBoolean(KEY_TRANSLATE_LEGACY, false)) {
+            TranslationSource.DEVICE
+        } else {
+            TranslationSource.PROVIDER
+        }
+    }
 
     private inline fun <reified T : Enum<T>> SharedPreferences.enum(key: String, fallback: T): T {
         val name = getString(key, null) ?: return fallback
@@ -357,7 +405,30 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     fun setFurigana(mode: FuriganaMode) = edit { putString(KEY_FURIGANA, mode.name) }
 
-    fun setShowTranslation(value: Boolean) = edit { putBoolean(KEY_TRANSLATE, value) }
+    fun setPrefetchNextTrack(value: Boolean) = edit { putBoolean(KEY_PREFETCH_NEXT, value) }
+
+    fun setTranslationSource(value: TranslationSource) = edit {
+        putString(KEY_TRANSLATE_SOURCE, value.name)
+        // Remember which of the two the user actually wanted, so the toggle over the
+        // lyrics can put it back without a third state on screen.
+        if (value != TranslationSource.OFF) putString(KEY_TRANSLATE_LAST, value.name)
+    }
+
+    /**
+     * What the chip over the lyrics does: off, or back to whichever source was last in
+     * use. Never silently starts a model download — an install that has never chosen
+     * lands on [TranslationSource.PROVIDER].
+     */
+    fun toggleTranslation() {
+        val current = current.translationSource
+        if (current != TranslationSource.OFF) {
+            setTranslationSource(TranslationSource.OFF)
+            return
+        }
+        val last = prefs.getString(KEY_TRANSLATE_LAST, null)
+            ?.let { name -> runCatching { enumValueOf<TranslationSource>(name) }.getOrNull() }
+        setTranslationSource(last?.takeIf { it != TranslationSource.OFF } ?: TranslationSource.PROVIDER)
+    }
 
     fun setTranslationTarget(tag: String) = edit { putString(KEY_TRANSLATE_TARGET, tag) }
 
@@ -457,7 +528,9 @@ class SettingsStore(context: Context) : ProviderCredentials {
             prefs.edit().putLong(KEY_SP_TOKEN_EXPIRY, value).apply()
         }
 
-    private companion object {
+    // Internal rather than private so the migration tests can plant an old install's
+    // preferences without guessing at the key names.
+    internal companion object {
         const val KEY_FONT_SCALE = "font_scale"
         const val KEY_FONT = "font"
         const val KEY_LINE_BLUR = "line_blur"
@@ -485,7 +558,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_ROMANIZE = "show_romanization"
         const val KEY_STRIP_DIACRITICS = "strip_diacritics"
         const val KEY_FURIGANA = "furigana"
-        const val KEY_TRANSLATE = "show_translation"
+        /** The boolean this setting used to be. Read once, to migrate; never written. */
+        const val KEY_TRANSLATE_LEGACY = "show_translation"
+        const val KEY_TRANSLATE_SOURCE = "translation_source"
+        const val KEY_TRANSLATE_LAST = "translation_source_last"
         const val KEY_TRANSLATE_TARGET = "translation_target"
         const val KEY_TRANSLATE_WIFI = "translation_wifi_only"
 
@@ -494,6 +570,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_POPUP_SHAPE = "popup_shape"
         const val KEY_POPUP_ARTWORK = "popup_artwork"
 
+        const val KEY_PREFETCH_NEXT = "prefetch_next"
         const val KEY_PROVIDERS_ON = "providers_enabled"
         const val KEY_PROVIDER_ORDER = "provider_order"
 

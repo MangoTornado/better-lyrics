@@ -145,4 +145,6 @@ dependencies {
     // The TTML parser goes through android.util.Xml, so its tests need a real
     // Android runtime rather than the stubbed one.
     testImplementation(libs.robolectric)
+    // ApplicationProvider, for the handful of tests that need a real Context.
+    testImplementation(libs.androidx.test.core)
 }

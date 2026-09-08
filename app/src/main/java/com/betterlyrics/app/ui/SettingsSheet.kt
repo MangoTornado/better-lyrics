@@ -56,6 +56,7 @@ import com.betterlyrics.app.settings.Settings
 import com.betterlyrics.app.settings.TextAnimationStyle
 import com.betterlyrics.app.settings.ViewMode
 import com.betterlyrics.app.ui.components.AppIcons
+import com.betterlyrics.app.settings.TranslationSource
 import kotlinx.coroutines.launch
 
 /**
@@ -555,18 +556,37 @@ fun SettingsSheet(
                 },
             )
 
-            ToggleRow(
-                title = "Translation",
-                subtitle = "Runs on the phone. Downloads a language model the first time",
-                checked = settings.showTranslation,
+            ChipGroup(
+                label = "Translation",
+                options = TranslationSource.entries.map { it to it.label },
+                selected = settings.translationSource,
                 accent = accent,
-                onCheckedChange = { store.setShowTranslation(it) },
+                onSelect = { store.setTranslationSource(it) },
+            )
+            Hint(
+                when (settings.translationSource) {
+                    TranslationSource.OFF -> "No translation under the lyrics."
+                    TranslationSource.PROVIDER ->
+                        "Whatever came with the lyrics. Free, instant, and written by a " +
+                            "person — but in the language they chose."
+                    TranslationSource.DEVICE ->
+                        "Machine translation into the language you pick below. Downloads a " +
+                            "model the first time."
+                },
             )
             Help(
-                "Runs entirely on the phone, so nothing is sent anywhere to be translated. A translation the lyrics source already provided is always preferred over a machine one.",
+                "These are two different things, which is why they are two different " +
+                    "choices. NetEase and the AMLL database ship human translations with the " +
+                    "lyrics: nothing to download, nothing sent anywhere, available the " +
+                    "instant the words are — but a Japanese song is usually translated into " +
+                    "Chinese, because that is who transcribed it. On-device translation is " +
+                    "ML Kit running on your phone, into the language you asked for, and it " +
+                    "replaces whatever the source supplied rather than leaving you reading " +
+                    "a language you did not choose. It still sends nothing anywhere; the " +
+                    "cost is a one-off model download per language pair.",
             )
 
-            if (settings.showTranslation) {
+            if (settings.translationSource == TranslationSource.DEVICE) {
                 ChipGroup(
                     label = "Translate into",
                     options = TRANSLATION_TARGETS,
@@ -582,9 +602,10 @@ fun SettingsSheet(
                     accent = accent,
                     onCheckedChange = { store.setTranslationWifiOnly(it) },
                 )
-            Help(
-                "Only affects the one-off model download, not the translating itself, which is offline.",
-            )
+                Help(
+                    "Only affects the one-off model download, not the translating itself, " +
+                        "which is offline.",
+                )
             }
 
             // ---- providers -------------------------------------------------
@@ -622,6 +643,22 @@ fun SettingsSheet(
                     },
                 )
             }
+
+            ToggleRow(
+                title = "Look up the next track early",
+                subtitle = "Only when the player says what is queued next",
+                checked = settings.prefetchNextTrack,
+                accent = accent,
+                onCheckedChange = { store.setPrefetchNextTrack(it) },
+            )
+            Help(
+                "Fetches the queued track's lyrics while the current one is still playing, " +
+                    "so they are on screen the moment it changes — and are there later even " +
+                    "with no signal. Most players publish no queue at all (Spotify among " +
+                    "them), in which case this does nothing rather than guessing. It always " +
+                    "waits for the track on screen to resolve first, and a track it fails to " +
+                    "find is looked up again properly when it actually plays.",
+            )
 
             // ---- keys ------------------------------------------------------
             Divider()

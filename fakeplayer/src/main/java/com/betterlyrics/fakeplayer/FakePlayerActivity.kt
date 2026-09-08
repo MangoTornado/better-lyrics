@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
+import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -89,6 +90,7 @@ class FakePlayerActivity : Activity() {
         }
 
         setContentView(buildUi())
+        publishQueue()
         selectTrack(0)
         handler.post(tick)
     }
@@ -139,6 +141,35 @@ class FakePlayerActivity : Activity() {
         return root
     }
 
+    /**
+     * Publish the track list as a queue.
+     *
+     * Real players mostly do not — Spotify publishes nothing here — so without this there
+     * is no way to exercise the app's prefetch of the next track at all. The durations go
+     * in the extras because a queue entry has nowhere else to put one, and the app needs
+     * one to look a track up under the key it will have when it starts playing.
+     */
+    private fun publishQueue() {
+        session.setQueueTitle("Fake queue")
+        session.setQueue(
+            tracks.mapIndexed { index, track ->
+                MediaSession.QueueItem(
+                    MediaDescription.Builder()
+                        .setMediaId("fake:${track.title}")
+                        .setTitle(track.title)
+                        .setSubtitle(track.artist)
+                        .setExtras(
+                            Bundle().apply {
+                                putLong(MediaMetadata.METADATA_KEY_DURATION, track.durationMs)
+                            },
+                        )
+                        .build(),
+                    index.toLong(),
+                )
+            },
+        )
+    }
+
     private fun selectTrack(index: Int) {
         trackIndex = ((index % tracks.size) + tracks.size) % tracks.size
         val track = tracks[trackIndex]
@@ -180,6 +211,9 @@ class FakePlayerActivity : Activity() {
                         PlaybackState.ACTION_SKIP_TO_NEXT or
                         PlaybackState.ACTION_SKIP_TO_PREVIOUS,
                 )
+                // Which queue entry is playing. Without it a queue says nothing about
+                // what comes next.
+                .setActiveQueueItemId(trackIndex.toLong())
                 .build(),
         )
 
