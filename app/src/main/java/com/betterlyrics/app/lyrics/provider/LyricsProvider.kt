@@ -9,8 +9,6 @@ import okhttp3.Call
 import okhttp3.Callback
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -183,40 +181,6 @@ object Http {
             .apply { headers.forEach { (k, v) -> if (k != "User-Agent") header(k, v) } }
             .get()
             .build()
-
-    /**
-     * Fire a JSON body at [url] and report only whether it was accepted.
-     *
-     * For telling a server something rather than asking it: nothing is read back, a failure is
-     * swallowed, and the caller carries on. Contributing to a cache is never worth interrupting
-     * the thing the user is actually doing.
-     */
-    suspend fun post(
-        url: String,
-        json: String,
-        headers: Map<String, String> = emptyMap(),
-    ): Boolean = suspendCancellableCoroutine { continuation ->
-        val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", headers["User-Agent"] ?: USER_AGENT)
-            .apply { headers.forEach { (k, v) -> if (k != "User-Agent") header(k, v) } }
-            .post(body)
-            .build()
-
-        val call = client.newCall(request)
-        continuation.invokeOnCancellation { runCatching { call.cancel() } }
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {
-                if (continuation.isActive) continuation.resume(false)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                val ok = response.use { it.isSuccessful }
-                if (continuation.isActive) continuation.resume(ok)
-            }
-        })
-    }
 
     /**
      * Thrown when a service did not answer, as distinct from answering "I do not have it".

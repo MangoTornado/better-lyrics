@@ -1190,28 +1190,25 @@ fun SettingsSheet(
                     )
 
                     ToggleRow(
-                        title = "Cache the artwork and tempo too",
-                        subtitle = "Not just the words — and contributes what your tokens find",
+                        title = "Ask the server for artwork and tempo",
+                        subtitle = "Not just the words",
                         checked = settings.cacheServerExtras,
                         accent = accent,
                         onCheckedChange = { store.setCacheServerExtras(it) },
                     )
                     Help(
-                        "The reason to want this: a Spotify token lasts an hour and an Apple " +
-                            "one a few months, but a cover URL and a tempo, once known, are " +
-                            "true forever. Whenever a token does produce them the app hands " +
-                            "them to your server, and from then on the server can answer for " +
-                            "that track with no token at all — on this phone after the token " +
-                            "expires, and for every track it never played with one in " +
-                            "hand.\n\nOnly what was learned is sent: the track's identity and " +
-                            "the URLs. Never a credential, and never the images themselves — " +
-                            "the server fetches those itself, which is a smaller payload and " +
-                            "the only way it ends up holding its own copy. Tempo comes from " +
-                            "Spotify alone, so this is the only way to have it without a live " +
-                            "token.\n\nReading needs no key even on your own network. " +
-                            "Contributing does — naming a URL the server will serve as a " +
-                            "track's cover is a write, so set the key above if you want this " +
-                            "half to work.",
+                        "The reason to want this: a Spotify token lasts an hour and an Apple one " +
+                            "a few months, but a cover URL, an ISRC and a tempo, once known, are " +
+                            "true forever. Your server collects them for itself every time it " +
+                            "looks a track up, so the tokens live on that one machine rather " +
+                            "than on every phone — and this asks for what it has.\n\nNothing " +
+                            "is sent from here but the track's title and artist. The phone has " +
+                            "nothing to contribute and no credential to hand over; asking is " +
+                            "all it does. Tempo comes from Spotify alone, so a server that " +
+                            "holds it is the only way to have it without a live token of your " +
+                            "own.\n\nUsed only when no token on this phone can answer — a live " +
+                            "token is about the track playing now, where the server is a record " +
+                            "of one that matched before.",
                     )
 
                     if (settings.cacheServerUrl.isNullOrBlank()) {

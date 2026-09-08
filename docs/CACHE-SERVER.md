@@ -110,74 +110,49 @@ timestamps *is* accepted, because unsynced lyrics are a real answer.
 
 ## Artwork and tempo
 
-Optional, and behind its own switch — **Developer → Cache the artwork and tempo too**. Off,
+Optional, and behind its own switch — **Developer → Ask the server for artwork and tempo**. Off,
 none of this is called.
 
-The reason it exists: a Spotify access token is good for about an hour and an Apple developer
-token for a few months, but a cover URL and a tempo, once known, are true forever. So the
-server becomes the thing that outlives the tokens.
+Read-only. The server collects these for itself, every time it looks a track up, so the tokens
+live on that one machine rather than on every phone. There is nothing for the app to contribute
+and no write endpoint to secure.
 
-### Reading
+The reason it exists: a Spotify access token is good for about an hour and an Apple developer
+token for a few months, but a cover URL, an ISRC and a tempo, once known, are true forever. The
+server is the thing that outlives the tokens.
 
 ```
 GET {baseUrl}/v1/extras?title=…&artist=…&album=…&durationMs=…&spotifyId=…
 ```
 
-Same parameters and same `Authorization: Bearer <key>` as the lyrics lookup. Answer:
+Same parameters and same optional `Authorization: Bearer <key>` as the lyrics lookup, and like a
+lookup it needs no key from the local network. Answer:
 
 ```json
 {
   "coverUrl": "https://…/cover.jpg",
   "artistImageUrl": "https://…/artist.jpg",
-  "tempo": 87.5
+  "tempo": 87.5,
+  "isrc": "JPU901800227",
+  "palette": { "bgColor": "1f1f24", "textColor1": "ffffff" },
+  "analysis": { "beats": [], "bars": [], "sections": [] },
+  "metadata": { "composerName": "…", "albumName": "…" }
 }
 ```
 
 - Every field is optional; an answer with none of them is the same as a 404.
-- `cover` and `artistImage` are accepted as aliases, and a `data` wrapper is allowed, as with
-  the lyrics.
+- `cover` and `artistImage` are accepted as aliases, and a `data` wrapper is allowed, as with the
+  lyrics.
 - The URLs may point anywhere — including back at the server, which is how it serves a copy it
   holds rather than a link to somebody else's.
-- `tempo` is beats per minute. It paces the animated background; nothing else uses it.
-- Only asked when no token can answer. A live Spotify or Apple token beats the cache, because
-  it is about the track playing now rather than a record of one that matched before.
-
-### Writing
-
-```
-POST {baseUrl}/v1/extras
-Content-Type: application/json
-```
-
-```json
-{
-  "title": "Lemon",
-  "artist": "Kenshi Yonezu",
-  "album": "Lemon",
-  "durationMs": 255000,
-  "spotifyId": "7Cd17G3oNQ34OWUwS8ZxfR",
-  "coverUrl": "https://i.scdn.co/image/…",
-  "artistImageUrl": "https://i.scdn.co/image/…",
-  "tempo": 87.5,
-  "source": "spotify"
-}
-```
-
-Sent once per track per run, whenever a token produced something. `source` is `spotify` or
-`applemusic`.
-
-**What the server should do with it:** fetch those URLs and keep its own copy, then serve that
-copy from `/v1/extras`. Storing the upstream URL alone mostly works and then quietly stops —
-Spotify's image CDN links are stable, Apple's templates less so, and neither is a promise.
-
-**What is deliberately not sent:** any credential, and the image bytes. The server fetching
-the URLs itself is both a smaller request and the only way it ends up holding the file.
-
-Reading needs no key even from the local network; contributing does, like every other write.
-Naming a URL the server will later serve as a track's cover art is content, not a lookup.
-
-Any non-2xx is fine. The app logs it and carries on: a contribution that fails costs nothing,
-and waiting on one would make the app slower for the benefit of a later playback.
+- `tempo` is beats per minute. It paces the animated background.
+- `palette`, `analysis` and `metadata` are held whole and served whole. The app reads none of
+  them yet; they are collected because the tokens are the scarce thing, not the storage, and
+  `audio-attributes` — which carries the tempo, key, loudness and the beat, bar and section grids
+  — was withdrawn from Spotify's public API in November 2024, so a cached copy is the only
+  durable one there is.
+- Only asked when no token on the phone can answer. A live token is about the track playing now,
+  where the server is a record of one that matched before.
 
 ## What the app does with it
 

@@ -2,7 +2,6 @@ package com.betterlyrics.app.media
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Log
 import com.betterlyrics.app.lyrics.provider.Http
 import com.betterlyrics.app.lyrics.provider.ProviderCredentials
 import kotlinx.coroutines.Dispatchers
@@ -21,24 +20,19 @@ data class CachedExtras(
 )
 
 /**
- * Artwork and tempo through your own cache server, in both directions.
+ * Artwork and tempo through your own cache server. Asking only.
  *
- * The point is that the server outlives the tokens. A Spotify access token is good for an
- * hour and an Apple developer token for a few months; a cover art URL and a tempo, once
- * known, are true forever. So when a token does produce them, the app tells the server — and
- * from then on the server can answer for that track with no token at all, for this phone
- * after the token expires and for anything else pointed at it.
+ * The server holds these because it outlives the tokens: a Spotify access token is good for
+ * about an hour and an Apple developer token for a few months, but a cover art URL, an ISRC and
+ * a tempo, once known, are true forever. It collects them itself every time it looks a track up,
+ * so the tokens live on one machine instead of on every phone.
  *
- * Contributing sends only what was learned: the track's identity and the URLs. Never a
- * credential, and never the images themselves — the server fetches those itself, which is
- * both a smaller payload and the only way it ends up holding its own copy.
+ * Which is why there is nothing to contribute from here, and no credential to send. The phone
+ * asks; being wrong about a track is not something it can make stick.
  */
 class CacheServerExtras(private val credentials: ProviderCredentials) {
 
     private val cache = LinkedHashMap<String, CachedExtras?>()
-
-    /** Tracks already contributed this run, so a replay does not re-send the same thing. */
-    private val contributed = HashSet<String>()
 
     val isAvailable: Boolean get() = base() != null
 
@@ -58,40 +52,6 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
         if (cache.size >= CACHE_SIZE) cache.keys.firstOrNull()?.let(cache::remove)
         cache[key] = extras
         extras
-    }
-
-    /**
-     * Tell the server what a token turned up, so it does not need one next time.
-     *
-     * Best-effort in every direction: one attempt, no retry, failures logged and forgotten.
-     * A cache that misses is a slower app; a cache that interrupts the app is a worse one.
-     */
-    suspend fun contribute(track: TrackInfo, extras: CachedExtras, source: String) {
-        val base = base() ?: return
-        if (track.isEmpty) return
-        if (extras.coverUrl == null && extras.artistImageUrl == null && extras.tempo == null) {
-            return
-        }
-        if (!contributed.add(track.cacheKey)) return
-
-        val payload = buildString {
-            append('{')
-            append("\"title\":").append(quote(track.title))
-            append(",\"artist\":").append(quote(track.artist))
-            if (track.album.isNotBlank()) append(",\"album\":").append(quote(track.album))
-            if (track.durationMs > 0) append(",\"durationMs\":").append(track.durationMs)
-            track.spotifyTrackId?.let { append(",\"spotifyId\":").append(quote(it)) }
-            extras.coverUrl?.let { append(",\"coverUrl\":").append(quote(it)) }
-            extras.artistImageUrl?.let { append(",\"artistImageUrl\":").append(quote(it)) }
-            extras.tempo?.let { append(",\"tempo\":").append(it) }
-            append(",\"source\":").append(quote(source))
-            append('}')
-        }
-
-        val accepted = runCatching {
-            Http.post("$base/v1/extras", payload, headers())
-        }.getOrDefault(false)
-        if (!accepted) Log.d(TAG, "cache server did not take the extras for ${track.title}")
     }
 
     /** Load one of the URLs [fetch] returned. */
@@ -132,24 +92,7 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
         runCatching { get(key)?.jsonPrimitive?.contentOrNull }.getOrNull()
             ?.takeIf { it.isNotBlank() }
 
-    /** Minimal JSON string escaping. The fields here are titles and URLs, not arbitrary data. */
-    private fun quote(value: String): String = buildString {
-        append('"')
-        for (c in value) {
-            when (c) {
-                '"' -> append("\\\"")
-                '\\' -> append("\\\\")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
-            }
-        }
-        append('"')
-    }
-
     private companion object {
-        const val TAG = "CacheServerExtras"
         const val CACHE_SIZE = 8
     }
 }
