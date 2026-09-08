@@ -78,6 +78,7 @@ class LyricsRenderer(
             !scrollSpring.canSleep() ||
             !pressSpring.canSleep() ||
             pressedIndex >= 0 ||
+            System.currentTimeMillis() < awakeUntil ||
             // A pending snap is work that has not happened yet, and it is only ever
             // carried out inside a frame. Without this, asking to jump back to the playing
             // line on a paused screen sets the flag and then never draws the frame that
@@ -92,6 +93,12 @@ class LyricsRenderer(
     private var lastPositionMs = 0
     private var activeIndex = -1
     private var snapNextFrame = true
+
+    /** Set by [followAfterSeek]: the next big position jump animates rather than snapping. */
+    private var ignoreNextSeekJump = false
+
+    /** Keep drawing until this moment even with nothing moving. See [followAfterSeek]. */
+    private var awakeUntil = 0L
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -125,7 +132,31 @@ class LyricsRenderer(
     fun jumpToActive() {
         userScrolling = false
         flingVelocity = 0f
+        resumeAutoScrollAt = 0L
         snapNextFrame = true
+    }
+
+    /**
+     * Hand the scroll back to the music, gliding rather than jumping.
+     *
+     * For tapping a line to seek to it. Following had stopped the moment the finger went
+     * down, and would not have resumed until the timeout expired — so the lyrics sat
+     * still while the song played on somewhere else. This puts them back in charge
+     * immediately, and the one position jump the seek causes is allowed to animate
+     * instead of snapping: the user pointed at the line they wanted, and watching the
+     * page travel there is the confirmation that it worked.
+     */
+    fun followAfterSeek() {
+        userScrolling = false
+        flingVelocity = 0f
+        resumeAutoScrollAt = 0L
+        snapNextFrame = false
+        ignoreNextSeekJump = true
+        // A seek is a request to the player, not a local change: the media session reports
+        // the new position some time later, and by then a settled screen has stopped
+        // drawing. Stay awake long enough to see the answer arrive, or the tap appears to
+        // do nothing until the screen is touched again.
+        awakeUntil = System.currentTimeMillis() + SEEK_AWAKE_MS
     }
 
     // ---- frame --------------------------------------------------------------
@@ -137,8 +168,11 @@ class LyricsRenderer(
         }
         lastFrameNanos = frameNanos
 
-        // A seek — as opposed to ordinary playback — should land, not glide.
-        if (abs(positionMs - lastPositionMs) > SEEK_THRESHOLD_MS) snapNextFrame = true
+        // A seek — as opposed to ordinary playback — should land, not glide. Unless the
+        // user caused it by tapping a line, in which case the glide is the point.
+        if (abs(positionMs - lastPositionMs) > SEEK_THRESHOLD_MS) {
+            if (ignoreNextSeekJump) ignoreNextSeekJump = false else snapNextFrame = true
+        }
         lastPositionMs = positionMs
 
         val newActiveIndex = layout.activeIndexAt(positionMs)
@@ -794,6 +828,14 @@ class LyricsRenderer(
         const val SCROLL_FREQUENCY = 1.15f
         const val SCROLL_DAMPING = 1f
         const val SEEK_THRESHOLD_MS = 1_500
+
+        /**
+         * How long to keep drawing after asking the player to seek.
+         *
+         * Long enough for a slow player to acknowledge, short enough that a mistaken tap
+         * does not hold the screen awake.
+         */
+        const val SEEK_AWAKE_MS = 1_500L
         const val FLING_DECAY_PER_FRAME = 0.94f
         const val FLING_STOP_PX_PER_SEC = 40f
     }

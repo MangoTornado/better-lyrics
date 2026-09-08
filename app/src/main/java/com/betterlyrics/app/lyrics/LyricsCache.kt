@@ -43,17 +43,33 @@ class LyricsCache(context: Context) {
             return@withContext null
         }
 
-        val age = System.currentTimeMillis() - entry.savedAtMs
-        val ttl = if (entry.document == null) NEGATIVE_TTL_MS else POSITIVE_TTL_MS
-        if (age > ttl) {
+        // A remembered miss is dropped on sight rather than honoured. Written by an older
+        // version, which cached "no lyrics" for two days; a track nobody had transcribed
+        // then may well be in the community database now, and the only moment the user
+        // cares is the moment they play it again.
+        if (entry.document == null) {
             file.delete()
             return@withContext null
         }
 
-        if (entry.document == null) Result.NotFound else Result.Hit(entry.document)
+        if (System.currentTimeMillis() - entry.savedAtMs > POSITIVE_TTL_MS) {
+            file.delete()
+            return@withContext null
+        }
+
+        Result.Hit(entry.document)
     }
 
+    /**
+     * Remember a document. Nulls are deliberately not stored.
+     *
+     * Caching a miss saves a lookup and costs a song: the sources grow, and a track that
+     * had nothing last week is worth asking about again the next time it plays. Asking once
+     * per play of an untranscribed song is a cost worth paying — and it is bounded, because
+     * a track only resolves once while it is playing.
+     */
     suspend fun put(key: String, document: LyricsDocument?) = withContext(Dispatchers.IO) {
+        if (document == null) return@withContext
         runCatching {
             directory.mkdirs()
             fileFor(key).writeText(
@@ -95,12 +111,10 @@ class LyricsCache(context: Context) {
 
     sealed interface Result {
         data class Hit(val document: LyricsDocument) : Result
-        data object NotFound : Result
     }
 
     private companion object {
         val POSITIVE_TTL_MS = TimeUnit.DAYS.toMillis(30)
-        val NEGATIVE_TTL_MS = TimeUnit.DAYS.toMillis(2)
         const val MAX_ENTRIES = 500
     }
 }

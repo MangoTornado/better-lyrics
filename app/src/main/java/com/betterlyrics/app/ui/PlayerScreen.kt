@@ -110,6 +110,7 @@ fun PlayerScreen(
     }
     val colors = remember(artwork) { ArtworkColors.from(artwork) }
     var showSettings by remember { mutableStateOf(false) }
+
     var showWelcome by remember { mutableStateOf(false) }
     // First run only. Deliberately not gated on the permission: the guide is what explains
     // why the permission is needed in the first place.
@@ -118,6 +119,17 @@ fun PlayerScreen(
     }
     var selectionMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(emptySet<Int>()) }
+
+    // A floating window is the size of a postage stamp; whatever was covering the lyrics
+    // has to get out of the way, or shrinking the app hands the user a miniature settings
+    // sheet instead of the thing they wanted to keep watching.
+    LaunchedEffect(popup) {
+        if (popup) {
+            showSettings = false
+            showWelcome = false
+            selectionMode = false
+        }
+    }
     var jumpSignal by remember { mutableIntStateOf(0) }
 
     // Leaving selection mode should not leave a highlight behind.
@@ -290,35 +302,35 @@ fun PlayerScreen(
                         modifier = Modifier.navigationBarsPadding(),
                     )
                 } else if (settings.viewMode == ViewMode.LYRICS) {
-                    snapshot.track?.let { track ->
-                        NowBar(
-                            track = track,
-                            playback = snapshot.playback,
-                            artwork = artwork,
-                            accent = colors.accent,
-                            transport = snapshot.transport,
-                            onTogglePlay = { container.media.togglePlayPause() },
-                            onNext = { container.media.skipNext() },
-                            onPrevious = { container.media.skipPrevious() },
-                            onSeek = { container.media.seekTo(it) },
-                            onOpenSource = { container.media.openSourceApp() },
-                            modifier = Modifier.navigationBarsPadding(),
-                        )
-                    }
-                    if (settings.showVolumeSlider && snapshot.track != null) {
-                        Box(
-                            Modifier
-                                .navigationBarsPadding()
-                                .padding(horizontal = 18.dp, vertical = 2.dp),
-                        ) {
-                            VolumeRow(
-                                volume = volume,
+                    // One navigation-bar inset for the pair of them. Applying it to the bar
+                    // and again to the volume row put the whole bar's worth of gap between
+                    // them, which is where the empty band above the slider came from.
+                    Column(Modifier.navigationBarsPadding()) {
+                        snapshot.track?.let { track ->
+                            NowBar(
+                                track = track,
+                                playback = snapshot.playback,
+                                artwork = artwork,
                                 accent = colors.accent,
-                                onVolumeChange = {
-                                    volume = it
-                                    audioManager.setMusicVolume(it)
-                                },
+                                transport = snapshot.transport,
+                                onTogglePlay = { container.media.togglePlayPause() },
+                                onNext = { container.media.skipNext() },
+                                onPrevious = { container.media.skipPrevious() },
+                                onSeek = { container.media.seekTo(it) },
+                                onOpenSource = { container.media.openSourceApp() },
                             )
+                        }
+                        if (settings.showVolumeSlider && snapshot.track != null) {
+                            Box(Modifier.padding(horizontal = 18.dp)) {
+                                VolumeRow(
+                                    volume = volume,
+                                    accent = colors.accent,
+                                    onVolumeChange = {
+                                        volume = it
+                                        audioManager.setMusicVolume(it)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -327,6 +339,12 @@ fun PlayerScreen(
                     com.betterlyrics.app.settings.ControlsPosition.BOTTOM
                 ) {
                     Box(Modifier.navigationBarsPadding()) { controls() }
+                } else if (settings.viewMode == ViewMode.CINEMA && !selectionMode) {
+                    // Cinema view puts the transport buttons at the bottom of the artwork
+                    // panel, and with the controls moved to the top there was nothing below
+                    // to hold the navigation bar off them — so the system bar sat on top of
+                    // play and skip. Reserve the inset explicitly.
+                    Spacer(Modifier.navigationBarsPadding())
                 }
             }
         }

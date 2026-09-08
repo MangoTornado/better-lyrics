@@ -227,6 +227,58 @@ class LyricsRepository(
     suspend fun hasLocal(): Boolean =
         currentRequest?.let { localStore.has(it) } ?: false
 
+    /** One source's answer for one track, in words, for the developer diagnostic. */
+    data class SourceReport(val id: String, val name: String, val outcome: String)
+
+    /**
+     * Ask every source about the track on screen and report what each one said.
+     *
+     * "Only LRCLIB works" is impossible to act on: a source that is skipped, one that
+     * cannot reach its endpoint, and one that reached it and found nothing all look exactly
+     * the same from the lyrics screen. This distinguishes them, per source, in one pass —
+     * bypassing the cache, because the point is what happens on the wire right now.
+     */
+    suspend fun diagnose(): List<SourceReport> {
+        val request = currentRequest ?: return listOf(
+            SourceReport("none", "No track", "Nothing is playing, so there is nothing to ask about"),
+        )
+        val settings = settingsStore.current
+
+        return providers.map { provider ->
+            val enabled = provider.id == localStore.id ||
+                provider.id in settings.enabledProviders ||
+                (provider.id == "cacheserver" && settings.cacheServerActive)
+
+            when {
+                !enabled -> SourceReport(provider.id, provider.displayName, "Off in settings")
+                !provider.isConfigured ->
+                    SourceReport(provider.id, provider.displayName, "Skipped — needs a token")
+
+                else -> {
+                    val started = System.currentTimeMillis()
+                    val outcome = try {
+                        val finished = withTimeoutOrNull(PROVIDER_TIMEOUT_MS) {
+                            Finished(provider.fetch(request))
+                        }
+                        val took = System.currentTimeMillis() - started
+                        val document = finished?.document
+                        when {
+                            finished == null -> "Timed out after ${PROVIDER_TIMEOUT_MS / 1000}s"
+                            document == null -> "No match (${took}ms)"
+                            else -> "${document.lines.size} lines, " +
+                                "${document.kind.name.lowercase()}-synced (${took}ms)"
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        "${e.javaClass.simpleName}: ${e.message?.take(120) ?: "no detail"}"
+                    }
+                    SourceReport(provider.id, provider.displayName, outcome)
+                }
+            }
+        }
+    }
+
     suspend fun clearCache() {
         cache.clear()
         derived.clear()
@@ -242,16 +294,6 @@ class LyricsRepository(
         when (val cached = cache.get(key)) {
             is LyricsCache.Result.Hit -> {
                 base.value = Base.Ready(key, cached.document)
-                return
-            }
-
-            LyricsCache.Result.NotFound -> {
-                // Re-check the user's own files: they may have imported one since.
-                localStore.fetch(request)?.let {
-                    base.value = Base.Ready(key, it)
-                    return
-                }
-                base.value = Base.NotFound
                 return
             }
 

@@ -256,12 +256,20 @@ fun LyricsView(
                                 ?.let { onSelectLine(it.index) }
 
                             else -> {
-                                if (tapToSeek && line != null && !line.isInterlude &&
-                                    document.isSynced
-                                ) {
+                                val seeking = tapToSeek && line != null &&
+                                    !line.isInterlude && document.isSynced
+                                if (seeking) {
                                     onSeek(line.startMs.toLong())
+                                    // Following stopped when the finger went down. Give it
+                                    // straight back and let the page glide to the tapped
+                                    // line — jumpToActive would snap, and snap to where the
+                                    // song still is, because the player has not been told
+                                    // yet.
+                                    renderer.followAfterSeek()
+                                } else {
+                                    // A tap that seeks nothing is a request to re-centre.
+                                    renderer.jumpToActive()
                                 }
-                                renderer.jumpToActive()
                             }
                         }
                     }

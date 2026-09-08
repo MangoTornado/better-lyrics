@@ -23,20 +23,46 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Musixmatch, via the token the desktop web player hands out to anonymous clients.
+ * Musixmatch — the widest source of *richsync*, true per-word timings, for Western music.
  *
- * This is the widest source of *richsync* — true per-word timings — for Western
- * music, which is what makes the karaoke rendering worth having on most tracks.
+ * **It needs a token of your own now.** The anonymous token the desktop web player used to
+ * hand out is no longer issued: `token.get` answers 200 with a row of zeros, and a request
+ * carrying that gets lyrics for an unrelated song. So the provider still tries for one — in
+ * case it starts working again — but reports itself unconfigured until either that succeeds
+ * or the user pastes in a real one, rather than being asked on every track and quietly
+ * returning nothing.
  *
- * It is an undocumented endpoint, so every step degrades: no token means no
- * provider, a token that stops working is dropped and re-fetched once, and a missing
- * richsync falls back to line-synced subtitles and then to plain lyrics.
+ * It is an undocumented endpoint, so every step degrades: no token means no provider, a
+ * token that stops working is dropped and re-fetched once, a match that does not look like
+ * the track playing is refused, and a missing richsync falls back to line-synced subtitles
+ * and then to plain lyrics.
  */
 class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsProvider {
 
     override val id = "musixmatch"
     override val displayName = "Musixmatch"
     override val canBeWordSynced = true
+
+    /**
+     * Set once the anonymous endpoint has been asked and found to be useless.
+     *
+     * In memory rather than in preferences, so a launch after Musixmatch fixes their end
+     * tries again. Until it is set the provider reports itself configured, or it would
+     * never get the one request it needs to find out.
+     */
+    private var anonymousTokenDead = false
+
+    /**
+     * A token of the user's own, a cached anonymous one, or the benefit of the doubt.
+     *
+     * Deliberately not "always true": with the anonymous endpoint handing out a dead token,
+     * claiming to be configured meant a request per track that could only fail — which is
+     * exactly what "Musixmatch doesn't work" looked like from the outside.
+     */
+    override val isConfigured: Boolean
+        get() = !credentials.musixmatchUserToken.isNullOrBlank() ||
+            !credentials.musixmatchGuestToken.isNullOrBlank() ||
+            !anonymousTokenDead
 
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
@@ -46,12 +72,20 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
             var token = userToken
                 ?: credentials.musixmatchGuestToken
                 ?: obtainToken()?.also { credentials.musixmatchGuestToken = it }
-                ?: return@withContext null
+                ?: run {
+                    // Asked, and there is nothing usable to be had. Stop claiming to be a
+                    // working source for the rest of this run.
+                    anonymousTokenDead = true
+                    return@withContext null
+                }
 
             var macro = macroCall(request, token)
             if (macro == null && userToken == null) {
                 // The cached anonymous token may have aged out; one retry with a fresh one.
-                token = obtainToken() ?: return@withContext null
+                token = obtainToken() ?: run {
+                    anonymousTokenDead = true
+                    return@withContext null
+                }
                 credentials.musixmatchGuestToken = token
                 macro = macroCall(request, token)
             }
@@ -70,9 +104,25 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
                     ?.jsonPrimitive?.intOrNull
                 if (status != 200) return@runCatching null
                 message["body"]?.jsonObject?.get("user_token")?.jsonPrimitive?.contentOrNull
-                    ?.takeIf { it.isNotBlank() && it != "UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly" }
+                    ?.takeIf { it.isUsableToken() }
             }.getOrNull()
         }
+    }
+
+    /**
+     * Whether a token from `token.get` is worth keeping.
+     *
+     * The endpoint stopped issuing real anonymous tokens: it answers 200 with fifty-six
+     * zeros. A request carrying one is accepted and returns lyrics for an unrelated song —
+     * asking for Kenshi Yonezu's "Lemon" came back with Drake — so it is worse than no
+     * token at all. Any token made of a single repeated character is rejected, which covers
+     * the zeros, the old `UpgradeOnly…` placeholder and whatever comes next.
+     */
+    private fun String.isUsableToken(): Boolean {
+        val value = trim()
+        if (value.length < 8) return false
+        if (value.startsWith("UpgradeOnly")) return false
+        return value.toSet().size > 1
     }
 
     private suspend fun macroCall(request: LyricsRequest, token: String): JsonObject? {

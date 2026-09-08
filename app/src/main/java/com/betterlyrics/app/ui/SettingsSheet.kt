@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterlyrics.app.AppContainer
@@ -58,6 +59,7 @@ import com.betterlyrics.app.settings.ViewMode
 import com.betterlyrics.app.ui.components.AppIcons
 import com.betterlyrics.app.settings.TranslationSource
 import com.betterlyrics.app.settings.CacheServerMode
+import com.betterlyrics.app.lyrics.LyricsRepository
 import kotlinx.coroutines.launch
 
 /**
@@ -113,7 +115,8 @@ private val PROVIDER_INFO = mapOf(
     ),
     "musixmatch" to ProviderInfo(
         "Musixmatch",
-        "Word-by-word for most Western music. A token of your own widens the catalogue.",
+        "Word-by-word for most Western music.",
+        needs = "Needs your own user token below — the anonymous one stopped working",
     ),
     "lrclib" to ProviderInfo(
         "LRCLIB",
@@ -923,6 +926,53 @@ fun SettingsSheet(
                 if (settings.cacheServerUrl.isNullOrBlank()) {
                     Hint("No URL set, so the cache server is not being asked.")
                 }
+
+                // ---- what each source actually said --------------------------
+                var probe by remember { mutableStateOf<List<LyricsRepository.SourceReport>?>(null) }
+                var probing by remember { mutableStateOf(false) }
+
+                ActionRow(
+                    title = if (probing) "Asking every source…" else "Test the sources",
+                    subtitle = "Asks each one about this track and reports what came back",
+                    accent = accent,
+                    onClick = {
+                        if (!probing) {
+                            scope.launch {
+                                probing = true
+                                probe = runCatching { container.lyrics.diagnose() }.getOrNull()
+                                probing = false
+                            }
+                        }
+                    },
+                )
+                Help(
+                    "A source that is switched off, one that cannot reach its endpoint, and " +
+                        "one that reached it and found nothing all look identical from the " +
+                        "lyrics screen — which makes \u201conly some of them work\u201d " +
+                        "impossible to act on. This asks each one directly, ignoring the " +
+                        "cache, and prints what it said.",
+                )
+
+                probe?.forEach { report ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            report.name,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.width(112.dp),
+                        )
+                        Text(
+                            report.outcome,
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -1167,7 +1217,11 @@ private fun <T> ChipGroup(
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(bottom = 6.dp),
         )
-        options.chunked(perRow).forEach { row ->
+        // Two options were being squeezed into two thirds of the row and padded with a
+        // spacer, which is what cut "Right / bottom" and "Only the cache server" in half.
+        // A group narrower than a full row gets the whole row instead.
+        val columns = minOf(perRow, options.size).coerceAtLeast(1)
+        options.chunked(columns).forEach { row ->
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1181,7 +1235,7 @@ private fun <T> ChipGroup(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -1208,7 +1262,12 @@ private fun ChoiceChip(
             color = if (selected) Color.White else Color.White.copy(alpha = 0.7f),
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1,
+            // Two lines, wrapped and centred, rather than one silently cut off. A label
+            // that does not fit should get taller, not shorter — a chip reading "From the"
+            // says nothing about what it does.
+            maxLines = 2,
+            textAlign = TextAlign.Center,
+            lineHeight = 14.sp,
         )
     }
 }
@@ -1331,7 +1390,7 @@ private fun SecretField(
                 modifier = Modifier.fillMaxWidth(),
             )
             if (text.isEmpty()) {
-                Text("not set", color = Color.White.copy(alpha = 0.3f), fontSize = 13.sp)
+                Text("Not set", color = Color.White.copy(alpha = 0.3f), fontSize = 13.sp)
             }
         }
     }

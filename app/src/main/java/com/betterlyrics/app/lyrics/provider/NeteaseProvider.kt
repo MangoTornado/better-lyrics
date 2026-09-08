@@ -51,12 +51,18 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
         }.distinct()
 
         for (query in queries) {
-            val url = credentials.neteaseBaseUrl + "/api/search/get/web" +
-                "?csrf_token=&hlpretag=&hlposttag=&s=${Http.encode(query)}" +
-                "&type=1&offset=0&total=true&limit=12"
+            // `/api/search/get`, not `/api/search/get/web`. The `/web` variant now answers
+            // with `{"result": "<hex>"}` — an encrypted blob rather than the song list it
+            // used to return — so every NetEase lookup failed at the first step and the
+            // provider looked simply broken. The plain endpoint still returns readable
+            // JSON with the same field names.
+            val url = credentials.neteaseBaseUrl + "/api/search/get" +
+                "?s=${Http.encode(query)}&type=1&offset=0&total=true&limit=12"
 
             val songs = Http.get(url, headers()) { body ->
                 runCatching {
+                    // A string here rather than an object means the encrypted shape came
+                    // back anyway; treat it as no result rather than crashing on it.
                     Json.parseToJsonElement(body).jsonObject["result"]
                         ?.jsonObject?.get("songs")?.jsonArray
                 }.getOrNull()

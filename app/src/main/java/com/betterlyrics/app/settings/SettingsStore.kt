@@ -97,10 +97,10 @@ enum class CacheServerMode(val label: String) {
 /** Which half of the screen the album art and track info occupy in Cinema view. */
 enum class MediaPanelSide(val label: String) {
     /** Left in landscape, top in portrait. */
-    START("Left / top"),
+    START("Left / Top"),
 
     /** Right in landscape, bottom in portrait. */
-    END("Right / bottom"),
+    END("Right / Bottom"),
 }
 
 /** Shape of the floating window. */
