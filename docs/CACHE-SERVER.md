@@ -173,6 +173,9 @@ Spotify's image CDN links are stable, Apple's templates less so, and neither is 
 **What is deliberately not sent:** any credential, and the image bytes. The server fetching
 the URLs itself is both a smaller request and the only way it ends up holding the file.
 
+Reading needs no key even from the local network; contributing does, like every other write.
+Naming a URL the server will later serve as a track's cover art is content, not a lookup.
+
 Any non-2xx is fine. The app logs it and carries on: a contribution that fails costs nothing,
 and waiting on one would make the app slower for the benefit of a later playback.
 

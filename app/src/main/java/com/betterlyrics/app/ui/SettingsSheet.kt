@@ -1208,7 +1208,10 @@ fun SettingsSheet(
                             "the server fetches those itself, which is a smaller payload and " +
                             "the only way it ends up holding its own copy. Tempo comes from " +
                             "Spotify alone, so this is the only way to have it without a live " +
-                            "token.",
+                            "token.\n\nReading needs no key even on your own network. " +
+                            "Contributing does — naming a URL the server will serve as a " +
+                            "track's cover is a write, so set the key above if you want this " +
+                            "half to work.",
                     )
 
                     if (settings.cacheServerUrl.isNullOrBlank()) {
