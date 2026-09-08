@@ -101,6 +101,16 @@ interface ProviderCredentials {
     /** A caching server of the user's own, set under the developer options. */
     val cacheServerUrl: String?
 
+    /**
+     * Optional key for [cacheServerUrl], sent as a bearer token.
+     *
+     * A server holding an Apple Music token has no business answering strangers, so one
+     * reachable from anywhere but the local network will want a key. Left empty for a server
+     * on your own Wi-Fi, which is the ordinary case and which such a server should let
+     * through unauthenticated.
+     */
+    val cacheServerKey: String?
+
     /** Optional: raises NetEase's per-IP limits and unlocks some regional catalogues. */
     val neteaseCookie: String?
 

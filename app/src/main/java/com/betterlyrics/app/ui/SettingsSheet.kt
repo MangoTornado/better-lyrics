@@ -879,6 +879,18 @@ fun SettingsSheet(
                     onChange = { store.updateCacheServerUrl(it) },
                 )
 
+                SecretField(
+                    label = "Cache server key",
+                    help = "Only needed if the server is not on your own network. A server " +
+                        "holding an Apple Music token should not answer strangers, so one " +
+                        "reachable from further away will want a key — it prints one when it " +
+                        "starts. Leave empty for a server on your Wi-Fi, which should let a " +
+                        "lookup through without it.",
+                    value = settings.cacheServerKey.orEmpty(),
+                    accent = accent,
+                    onChange = { store.updateCacheServerKey(it) },
+                )
+
                 ChipGroup(
                     label = "How to use it",
                     options = CacheServerMode.entries.map { it to it.label },

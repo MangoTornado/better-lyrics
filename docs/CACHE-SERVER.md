@@ -8,6 +8,10 @@ This exists so the server can be written against a fixed target. Nothing here is
 to use the app, and with the developer switch off none of it runs — a URL left behind in
 preferences stops being used rather than quietly answering.
 
+`CacheServerContractTest` checks this against a response a real server actually sent, so if
+either side drifts the build says so. A cache server returning something unreadable otherwise
+looks exactly like a track nobody has transcribed, which is the failure worth making loud.
+
 ## Why a server at all
 
 The free sources are the reason this app works without an account, and two of them are
@@ -33,8 +37,21 @@ GET {baseUrl}/v1/lyrics?title=…&artist=…&album=…&durationMs=…&spotifyId=
 Everything is URL-encoded with `%20` for spaces. `Accept: application/json,
 application/xml, text/plain`.
 
-The app sends no authentication and no identifying header. If you want the server private,
-put it behind something the network layer handles.
+## Authentication
+
+By default the app sends none, because a lookup cannot expose anything: it carries a title and
+an artist, and nothing it can ask for returns a credential. A server on your own network should
+let that through.
+
+A server reachable from further away should not — one holding an Apple Music token has no
+business answering strangers. Put its key in **Cache server key** and the app sends
+`Authorization: Bearer <key>`. Left empty, the header is absent rather than empty, so the same
+build works against both.
+
+That is the split
+[better-lyrics-server](https://github.com/MangoTornado/better-lyrics-server) implements: its
+admin surface, the only part that can read a token, always demands the key; a lookup from the
+local network does not.
 
 A request may arrive for a track that is *about to* play rather than one playing now — the
 app prefetches the next queued track when the player publishes a queue. Those look
@@ -85,6 +102,11 @@ translations all survive. This is the format Apple Music and the AMLL database u
 **No lyrics**: any non-2xx, or an empty body. `404` is the obvious one. The app treats a
 failure and a miss identically — the provider simply contributes nothing to that track's
 lookup — so there is no need to distinguish them on the wire.
+
+**Not lyrics**: markup that is not TTML is refused rather than shown. The realistic accident is
+a misconfigured server, or something in front of it, answering `200` with an error page; a
+lyric line reading "502 Bad Gateway" is worse than finding nothing. Plain text with no
+timestamps *is* accepted, because unsynced lyrics are a real answer.
 
 ## What the app does with it
 

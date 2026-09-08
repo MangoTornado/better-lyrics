@@ -50,8 +50,22 @@ class CacheServerProvider(private val credentials: ProviderCredentials) : Lyrics
                 request.spotifyTrackId?.let { append("&spotifyId=").append(Http.encode(it)) }
             }
 
-            Http.get("$base/v1/lyrics?$query", HEADERS) { body -> documentFrom(body) }
+            Http.get("$base/v1/lyrics?$query", headers()) { body -> documentFrom(body) }
         }
+
+    /**
+     * A key only if one was given.
+     *
+     * A server on your own network should let a lookup through unauthenticated — nothing about
+     * asking for lyrics can expose a credential, and the app is the only thing on the Wi-Fi
+     * asking. One reachable from further away should not, so the header goes out when a key is
+     * set and is otherwise absent rather than empty.
+     */
+    private fun headers(): Map<String, String> {
+        val key = credentials.cacheServerKey?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return HEADERS
+        return HEADERS + ("Authorization" to "Bearer $key")
+    }
 
     /**
      * Turn whatever the server sent into a document.
@@ -61,7 +75,7 @@ class CacheServerProvider(private val credentials: ProviderCredentials) : Lyrics
      * mistaken for each other: JSON opens with a brace, TTML with an angle bracket, and LRC
      * with a timestamp or plain text.
      */
-    private fun documentFrom(body: String): LyricsDocument? {
+    internal fun documentFrom(body: String): LyricsDocument? {
         val text = body.trim()
         if (text.isEmpty()) return null
 

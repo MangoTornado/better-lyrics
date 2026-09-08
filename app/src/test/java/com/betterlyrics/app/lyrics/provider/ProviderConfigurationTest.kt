@@ -17,6 +17,7 @@ class ProviderConfigurationTest {
     private class FakeCredentials(
         override var spDcCookie: String? = null,
         override val cacheServerUrl: String? = null,
+        override val cacheServerKey: String? = null,
         override val appleDeveloperToken: String? = null,
         override val appleMusicUserToken: String? = null,
     ) : ProviderCredentials {

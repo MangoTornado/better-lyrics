@@ -224,6 +224,7 @@ data class Settings(
     /** Reveals the section below in Settings. Off, and none of it is reachable. */
     val developerMode: Boolean = false,
     val cacheServerUrl: String? = null,
+    val cacheServerKey: String? = null,
     val cacheServerMode: CacheServerMode = CacheServerMode.PARALLEL,
 ) {
     /** True when a cache server is configured and the developer options are on. */
@@ -329,6 +330,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
         developerMode = prefs.getBoolean(KEY_DEVELOPER_MODE, false),
         cacheServerUrl = prefs.trimmed(KEY_CACHE_SERVER_URL),
+        cacheServerKey = prefs.trimmed(KEY_CACHE_SERVER_KEY),
         cacheServerMode = prefs.enum(KEY_CACHE_SERVER_MODE, CacheServerMode.PARALLEL),
     )
 
@@ -527,6 +529,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_CACHE_SERVER_URL, value?.trim()?.trimEnd('/'))
     }
 
+    fun updateCacheServerKey(value: String?) = edit {
+        putString(KEY_CACHE_SERVER_KEY, value?.trim())
+    }
+
     fun setCacheServerMode(value: CacheServerMode) = edit {
         putString(KEY_CACHE_SERVER_MODE, value.name)
     }
@@ -557,6 +563,9 @@ class SettingsStore(context: Context) : ProviderCredentials {
     // cannot keep answering after the switch is turned off.
     override val cacheServerUrl: String?
         get() = current.cacheServerUrl?.takeIf { current.developerMode }
+
+    override val cacheServerKey: String?
+        get() = current.cacheServerKey?.takeIf { current.developerMode }
     override val neteaseCookie: String? get() = current.neteaseCookie
     override val musixmatchUserToken: String? get() = current.musixmatchUserToken
     override val appleDeveloperToken: String? get() = current.appleDeveloperToken
@@ -641,6 +650,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_AMLL_URL = "amll_url"
         const val KEY_DEVELOPER_MODE = "developer_mode"
         const val KEY_CACHE_SERVER_URL = "cache_server_url"
+        const val KEY_CACHE_SERVER_KEY = "cache_server_key"
         const val KEY_CACHE_SERVER_MODE = "cache_server_mode"
         const val KEY_NETEASE_COOKIE = "netease_cookie"
         const val KEY_APPLE_DEV_TOKEN = "apple_dev_token"
