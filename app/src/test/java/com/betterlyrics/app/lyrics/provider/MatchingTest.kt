@@ -65,6 +65,36 @@ class MatchingTest {
     }
 
     @Test
+    fun `a name in another script is unknown, not wrong`() {
+        // The community and East Asian catalogues credit artists in the original script,
+        // while the media session reports whatever Spotify chose — usually Latin. Letter
+        // similarity between the two is zero, but they are the same person, so a correct
+        // match must survive it.
+        val japanese = LyricsRequest(
+            title = "Lemon",
+            artist = "Kenshi Yonezu",
+            album = "Lemon",
+            durationMs = 255_000,
+        )
+        val score = Matching.score(japanese, "Lemon", "米津玄師", 255_000)
+        assertTrue("got $score", score >= Matching.MATCH_THRESHOLD)
+    }
+
+    @Test
+    fun `an unrelated song is still rejected across scripts`() {
+        // The allowance above must not become a way in for the wrong track: with the
+        // artist unknown, the title and duration have to carry the match on their own.
+        val japanese = LyricsRequest(
+            title = "Lemon",
+            artist = "Kenshi Yonezu",
+            album = "Lemon",
+            durationMs = 255_000,
+        )
+        val score = Matching.score(japanese, "残酷な天使のように", "高橋洋子", 88_000)
+        assertTrue("got $score", score < Matching.MATCH_THRESHOLD)
+    }
+
+    @Test
     fun `a wildly different duration drags the score down`() {
         val close = Matching.score(request, "Song Title", "The Artist", 210_000)
         val far = Matching.score(request, "Song Title", "The Artist", 400_000)

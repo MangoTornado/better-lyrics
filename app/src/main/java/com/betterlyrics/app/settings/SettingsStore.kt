@@ -173,6 +173,7 @@ data class Settings(
     val musixmatchUserToken: String? = null,
     val lrcLibBaseUrl: String = DEFAULT_LRCLIB_URL,
     val neteaseBaseUrl: String = DEFAULT_NETEASE_URL,
+    val amllBaseUrl: String = DEFAULT_AMLL_URL,
     val neteaseCookie: String? = null,
     val appleDeveloperToken: String? = null,
     val appleMusicUserToken: String? = null,
@@ -180,17 +181,21 @@ data class Settings(
 ) {
     companion object {
         val DEFAULT_PROVIDER_ORDER = listOf(
-            "local", "applemusic", "spotify", "netease", "musixmatch", "lrclib",
+            // Highest first. `amll` outranks everything token-free because its files are
+            // hand-timed per syllable — the same thing Apple ships, without the account.
+            "local", "applemusic", "amll", "spotify", "netease", "musixmatch", "lrclib",
         )
 
         /**
          * The ones that work with no setup. The rest need a token, or are somebody
          * else's service, so they stay off until asked for.
          */
-        val DEFAULT_ENABLED_PROVIDERS = setOf("local", "netease", "musixmatch", "lrclib")
+        val DEFAULT_ENABLED_PROVIDERS =
+            setOf("local", "amll", "netease", "musixmatch", "lrclib")
 
         const val DEFAULT_LRCLIB_URL = "https://lrclib.net"
         const val DEFAULT_NETEASE_URL = "https://music.163.com"
+        const val DEFAULT_AMLL_URL = "https://api.amll.dev"
     }
 }
 
@@ -264,6 +269,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         musixmatchUserToken = prefs.trimmed(KEY_MXM_USER_TOKEN),
         lrcLibBaseUrl = prefs.trimmed(KEY_LRCLIB_URL) ?: Settings.DEFAULT_LRCLIB_URL,
         neteaseBaseUrl = prefs.trimmed(KEY_NETEASE_URL) ?: Settings.DEFAULT_NETEASE_URL,
+        amllBaseUrl = prefs.trimmed(KEY_AMLL_URL) ?: Settings.DEFAULT_AMLL_URL,
         neteaseCookie = prefs.trimmed(KEY_NETEASE_COOKIE),
         appleDeveloperToken = prefs.trimmed(KEY_APPLE_DEV_TOKEN),
         appleMusicUserToken = prefs.trimmed(KEY_APPLE_USER_TOKEN),
@@ -402,6 +408,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_NETEASE_URL, value?.trim()?.trimEnd('/'))
     }
 
+    fun updateAmllBaseUrl(value: String?) = edit {
+        putString(KEY_AMLL_URL, value?.trim()?.trimEnd('/'))
+    }
+
     fun updateNeteaseCookie(value: String?) = edit { putString(KEY_NETEASE_COOKIE, value?.trim()) }
 
     fun updateAppleDeveloperToken(value: String?) =
@@ -418,6 +428,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     override val lrcLibBaseUrl: String get() = current.lrcLibBaseUrl
     override val neteaseBaseUrl: String get() = current.neteaseBaseUrl
+    override val amllBaseUrl: String get() = current.amllBaseUrl
     override val neteaseCookie: String? get() = current.neteaseCookie
     override val musixmatchUserToken: String? get() = current.musixmatchUserToken
     override val appleDeveloperToken: String? get() = current.appleDeveloperToken
@@ -493,6 +504,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_MXM_USER_TOKEN = "mxm_user_token"
         const val KEY_LRCLIB_URL = "lrclib_url"
         const val KEY_NETEASE_URL = "netease_url"
+        const val KEY_AMLL_URL = "amll_url"
         const val KEY_NETEASE_COOKIE = "netease_cookie"
         const val KEY_APPLE_DEV_TOKEN = "apple_dev_token"
         const val KEY_APPLE_USER_TOKEN = "apple_user_token"

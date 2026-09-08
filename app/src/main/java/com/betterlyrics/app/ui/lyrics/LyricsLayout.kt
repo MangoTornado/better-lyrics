@@ -372,6 +372,8 @@ object LyricsLayoutBuilder {
         // reading needs without fragmenting the line into separate words.
         val romanizedGap = metrics.wordGapPx * 0.55f
 
+        val hasSyllableRomanization = line.syllables.any { !it.romanized.isNullOrBlank() }
+
         // RTL text is shaped as a run; splitting it per syllable would break the joins,
         // so each word stays whole and takes its syllables' combined window.
         val displayWords: List<List<DisplayPiece>> = words.map { word ->
@@ -473,8 +475,20 @@ object LyricsLayoutBuilder {
             flatRows += TextRow(rowText.toString(), rowStartX, baseline)
         }
 
+        // A romanization that exists only for the whole line cannot be swapped in per
+        // syllable — the community corpus writes it mora by mora (`fu ka n ze n na bo ku
+        // wo` against six sung syllables), so there is no honest way to map one onto the
+        // other. Rather than guess an alignment and desynchronise the karaoke, the
+        // original text keeps its timings and the reading is shown underneath.
+        val lineRomanization = if (useRomanization && !hasSyllableRomanization) {
+            line.romanized?.takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
+
         val secondary = secondaryRows(
             line, metrics, maxWidth, alignRight, contentHeight, showTranslation,
+            romanization = lineRomanization,
         )
         val secondaryHeight = secondary.size * metrics.secondaryFontSizePx * 1.35f
 
@@ -641,8 +655,11 @@ object LyricsLayoutBuilder {
             )
         }
 
+        // No syllables to desynchronise here, so the romanization simply replaces the
+        // text above and needs no row of its own.
         val secondary = secondaryRows(
             line, metrics, maxWidth, alignRight, contentHeight, showTranslation,
+            romanization = null,
         )
         val secondaryHeight = secondary.size * metrics.secondaryFontSizePx * 1.35f
 
@@ -659,6 +676,12 @@ object LyricsLayoutBuilder {
         )
     }
 
+    /**
+     * The smaller rows under a line: its reading first, then its translation.
+     *
+     * Reading before meaning, because that is the order they are useful in — you sing
+     * from the romanization and glance at the translation.
+     */
     private fun secondaryRows(
         line: LyricLine,
         metrics: LyricsMetrics,
@@ -666,19 +689,28 @@ object LyricsLayoutBuilder {
         alignRight: Boolean,
         contentTop: Float,
         showTranslation: Boolean,
+        romanization: String?,
     ): List<TextRow> {
-        if (!showTranslation) return emptyList()
-        val text = line.translated?.takeIf { it.isNotBlank() } ?: return emptyList()
+        val texts = buildList {
+            romanization?.let { add(it) }
+            if (showTranslation) line.translated?.takeIf { it.isNotBlank() }?.let { add(it) }
+        }
+        if (texts.isEmpty()) return emptyList()
+
         val paint = metrics.secondaryPaint
         val rowHeight = metrics.secondaryFontSizePx * 1.35f
-        return wrap(text, paint, maxWidth).mapIndexed { rowIndex, rowText ->
-            val width = paint.measureText(rowText)
-            TextRow(
-                text = rowText,
-                x = if (alignRight) maxWidth - width else 0f,
-                baseline = contentTop + rowIndex * rowHeight + rowHeight * 0.8f,
-            )
+        val out = ArrayList<TextRow>(texts.size)
+        for (text in texts) {
+            for (rowText in wrap(text, paint, maxWidth)) {
+                val width = paint.measureText(rowText)
+                out += TextRow(
+                    text = rowText,
+                    x = if (alignRight) maxWidth - width else 0f,
+                    baseline = contentTop + out.size * rowHeight + rowHeight * 0.8f,
+                )
+            }
         }
+        return out
     }
 
     // ---- interlude ----------------------------------------------------------

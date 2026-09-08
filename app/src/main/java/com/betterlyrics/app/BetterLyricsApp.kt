@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.betterlyrics.app.lyrics.LyricsCache
 import com.betterlyrics.app.lyrics.LyricsRepository
+import com.betterlyrics.app.lyrics.provider.AmllTtmlProvider
 import com.betterlyrics.app.lyrics.provider.AppleMusicProvider
 import com.betterlyrics.app.lyrics.provider.LocalLyricsStore
 import com.betterlyrics.app.lyrics.provider.LrcLibProvider
@@ -47,6 +48,7 @@ class AppContainer(context: Context) {
     val providers: List<LyricsProvider> = listOf(
         localLyrics,
         AppleMusicProvider(settings),
+        AmllTtmlProvider(settings),
         SpotifyLyricsProvider(settings),
         NeteaseProvider(settings),
         MusixmatchProvider(settings),

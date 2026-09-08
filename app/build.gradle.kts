@@ -101,6 +101,14 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests {
+            // Robolectric needs the real android.jar, not the stub that throws on every
+            // call — the TTML parser runs entirely through android.util.Xml.
+            isIncludeAndroidResources = true
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -134,4 +142,7 @@ dependencies {
     implementation(libs.mlkit.translate)
 
     testImplementation(libs.junit)
+    // The TTML parser goes through android.util.Xml, so its tests need a real
+    // Android runtime rather than the stubbed one.
+    testImplementation(libs.robolectric)
 }

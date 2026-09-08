@@ -25,14 +25,17 @@ private fun Char.isCyrillic(): Boolean =
 private fun Char.isGreek(): Boolean =
     this in 'Ͱ'..'Ͽ' || this in 'ἀ'..'῿'
 
+// The ranges are written as escapes rather than as literals: the last one ends at the
+// byte-order mark, which is invisible in an editor and which tooling reads as a file
+// marker rather than as a character.
 private fun Char.isRtlChar(): Boolean =
-    this in '֐'..'׿' || // Hebrew
-        this in '؀'..'ۿ' || // Arabic
-        this in '܀'..'ݏ' || // Syriac
-        this in 'ݐ'..'ݿ' ||
-        this in 'ࢠ'..'ࣿ' ||
-        this in 'יִ'..'﷿' ||
-        this in 'ﹰ'..'﻿'
+    this in '\u0590'..'\u05FF' || // Hebrew
+        this in '\u0600'..'\u06FF' || // Arabic
+        this in '\u0700'..'\u074F' || // Syriac
+        this in '\u0750'..'\u077F' || // Arabic Supplement
+        this in '\u08A0'..'\u08FF' || // Arabic Extended-A
+        this in '\uFB1D'..'\uFDFF' || // Hebrew and Arabic presentation forms
+        this in '\uFE70'..'\uFEFF' // Arabic Presentation Forms-B
 
 /** True when the line should be laid out right-to-left. */
 fun String.isRtlText(): Boolean {
@@ -109,6 +112,14 @@ fun Script.needsRomanization(): Boolean = when (this) {
 fun isSpacelessScript(text: String): Boolean = text.any { c ->
     c.isHiraganaOrKatakana() || c.isHan() || c.isHangul()
 }
+
+/**
+ * True when [text] contains at least one Latin letter.
+ *
+ * The test for whether two names can be compared letter by letter: `YOASOBI (ヨアソビ)`
+ * and `YOASOBI` can, `米津玄師` and `Kenshi Yonezu` cannot.
+ */
+fun hasLatinLetters(text: String): Boolean = text.any { it.code < 0x250 && it.isLetter() }
 
 /** True when [text] still contains characters the romanizer was supposed to convert. */
 fun containsNonLatinScript(text: String): Boolean = text.any { c ->

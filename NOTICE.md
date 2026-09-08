@@ -61,6 +61,26 @@ A reference point for what good lyrics rendering looks like, and the project tha
 established much of this space. **No code from it is used here** — it carries no licence
 grant, so it was read only as prior art, not as a source.
 
+## AMLL TTML Database — amll-dev and its contributors
+
+https://github.com/amll-dev/amll-ttml-db · **CC0 1.0** (public domain dedication)
+
+The reason this app can show hand-timed, word-by-word lyrics with no account of any kind.
+A community corpus of TTML — the same format Apple Music's own lyrics are authored in —
+indexed by Spotify, Apple Music, NetEase, QQ Music and ISRC, with syllable timings, duet
+agents, background vocals, readings and translations.
+
+The app queries it at runtime rather than shipping any of it, and the contributor who
+timed the file you are reading is credited by name under the last line. The one exception is
+`app/src/test/resources/amll-sample.ttml`: the opening of a real response, kept verbatim so
+the parser is tested against the actual dialect. CC0 asks for nothing, but it was made by
+hand and is worth saying so.
+
+Its API server is separate and also free software:
+[amll-ttml-api](https://github.com/amll-dev/amll-ttml-api) (MIT / Apache-2.0). The default
+endpoint is the project's own instance, run by volunteers — **Settings → AMLL TTML
+instance** exists so that heavy users can point the app at their own copy instead.
+
 ## Kuromoji — Atilika
 
 https://github.com/atilika/kuromoji · Apache-2.0
@@ -89,6 +109,9 @@ Lyrics belong to their writers and publishers. This app stores nothing but a loc
 on your own device, and queries the same community and public sources the desktop
 extensions do:
 
+- **[AMLL TTML Database](https://github.com/amll-dev/amll-ttml-db)** — community-timed,
+  public-domain, word-by-word. The first thing tried after your own files, because nothing
+  else gives syllable timings without a token.
 - **[LRCLIB](https://lrclib.net)** — an open, key-less, community-run database. Please
   read their guidelines before pointing anything high-volume at it.
 - **NetEase Cloud Music** — public web endpoints. Also the source of the hand-checked

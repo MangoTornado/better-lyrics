@@ -95,6 +95,11 @@ private val PROVIDER_INFO = mapOf(
         "Word-by-word, with official romanizations and translations. The best data there is.",
         needs = "Needs a developer token and a music user token below",
     ),
+    "amll" to ProviderInfo(
+        "AMLL TTML Database",
+        "Community-timed, word-by-word, public domain. Hand-made syllable timings with " +
+            "readings and translations, and no account needed.",
+    ),
     "spotify" to ProviderInfo(
         "Spotify",
         "The lyrics the Spotify app shows, matched to the exact track.",
@@ -678,6 +683,16 @@ fun SettingsSheet(
             )
 
             SecretField(
+                label = "AMLL TTML instance",
+                help = "The community lyrics index. The default is the project's own server, " +
+                    "run by volunteers — if you use it heavily, run your own copy of " +
+                    "amll-ttml-api and point this at it.",
+                value = settings.amllBaseUrl,
+                accent = accent,
+                onChange = { store.updateAmllBaseUrl(it) },
+            )
+
+            SecretField(
                 label = "LRCLIB instance",
                 help = "Point at your own mirror if you run one.",
                 value = settings.lrcLibBaseUrl,
@@ -872,6 +887,14 @@ private fun CreditsPanel(accent: Color, onBack: () -> Unit) {
         accent = accent,
     )
     Credit(
+        title = "AMLL TTML Database — amll-dev and its contributors (CC0 1.0)",
+        body = "The word-by-word lyrics this app shows without any account. Every file in it " +
+            "was timed by hand and dedicated to the public domain; the contributor who made " +
+            "the one you are reading is named under the last line.",
+        link = "https://github.com/amll-dev/amll-ttml-db",
+        accent = accent,
+    )
+    Credit(
         title = "OkHttp — Square (Apache-2.0), AndroidX and Kotlin (Apache-2.0)",
         body = "Networking, UI and language runtime.",
         link = null,
@@ -879,9 +902,9 @@ private fun CreditsPanel(accent: Color, onBack: () -> Unit) {
     )
     Credit(
         title = "Lyrics sources",
-        body = "LRCLIB, NetEase Cloud Music, Musixmatch, Spotify and Apple Music. None are " +
-            "affiliated with this app. Lyrics belong to their writers and publishers; " +
-            "nothing is stored anywhere but this device's own cache.",
+        body = "The AMLL TTML Database, LRCLIB, NetEase Cloud Music, Musixmatch, Spotify " +
+            "and Apple Music. None are affiliated with this app. Lyrics belong to their " +
+            "writers and publishers; nothing is stored anywhere but this device's own cache.",
         link = null,
         accent = accent,
     )

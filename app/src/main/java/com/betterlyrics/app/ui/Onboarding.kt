@@ -111,7 +111,9 @@ fun WelcomeSheet(
             Step(
                 number = "2",
                 title = "No tokens needed for most music",
-                body = "Three sources work immediately, with no account and no setup:\n\n" +
+                body = "Four sources work immediately, with no account and no setup:\n\n" +
+                    "•  AMLL TTML Database — community-timed word-by-word lyrics, made by " +
+                    "hand and released to the public domain\n" +
                     "•  LRCLIB — open community database\n" +
                     "•  Musixmatch — word-by-word for most Western music\n" +
                     "•  NetEase — word-by-word for East Asian music, with hand-checked " +

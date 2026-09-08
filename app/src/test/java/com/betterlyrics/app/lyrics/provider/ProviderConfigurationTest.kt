@@ -21,6 +21,7 @@ class ProviderConfigurationTest {
     ) : ProviderCredentials {
         override val lrcLibBaseUrl = Settings.DEFAULT_LRCLIB_URL
         override val neteaseBaseUrl = Settings.DEFAULT_NETEASE_URL
+        override val amllBaseUrl = Settings.DEFAULT_AMLL_URL
         override val neteaseCookie: String? = null
         override val musixmatchUserToken: String? = null
         override val appleStorefront = "us"
@@ -58,6 +59,8 @@ class ProviderConfigurationTest {
         assertTrue(NeteaseProvider(credentials).isConfigured)
         // Musixmatch can mint an anonymous token for itself, so it needs nothing either.
         assertTrue(MusixmatchProvider(credentials).isConfigured)
+        // The community database is public and needs no account at all.
+        assertTrue(AmllTtmlProvider(credentials).isConfigured)
     }
 
     @Test
@@ -66,6 +69,7 @@ class ProviderConfigurationTest {
         assertTrue(AppleMusicProvider(credentials).canBeWordSynced)
         assertTrue(NeteaseProvider(credentials).canBeWordSynced)
         assertTrue(MusixmatchProvider(credentials).canBeWordSynced)
+        assertTrue(AmllTtmlProvider(credentials).canBeWordSynced)
         // Spotify's colour-lyrics endpoint is line-synced only.
         assertFalse(SpotifyLyricsProvider(credentials).canBeWordSynced)
         assertFalse(LrcLibProvider(credentials).canBeWordSynced)
@@ -76,6 +80,7 @@ class ProviderConfigurationTest {
         val credentials = FakeCredentials()
         val implemented = listOf(
             AppleMusicProvider(credentials).id,
+            AmllTtmlProvider(credentials).id,
             SpotifyLyricsProvider(credentials).id,
             NeteaseProvider(credentials).id,
             MusixmatchProvider(credentials).id,

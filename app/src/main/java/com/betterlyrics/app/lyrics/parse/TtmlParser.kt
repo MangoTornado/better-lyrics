@@ -23,6 +23,23 @@ object TtmlParser {
 
     private const val ROLE_BACKGROUND = "x-bg"
 
+    /**
+     * Untimed sibling spans carrying a line's romanization and translation.
+     *
+     * The community TTML corpus puts them at the end of the `<p>`, like this:
+     *
+     * ```
+     * <span begin="…" end="…">僕</span><span begin="…" end="…">を</span>
+     * <span ttm:role="x-translation" xml:lang="zh-CN">…</span>
+     * <span ttm:role="x-roman">bo ku wo</span>
+     * ```
+     *
+     * They have no `begin`, so without recognising them they would be read as syllables at
+     * time zero and the romaji would be spliced into the sung line.
+     */
+    private const val ROLE_ROMANIZATION = "x-roman"
+    private const val ROLE_TRANSLATION = "x-translation"
+
     fun parse(
         xml: String,
         providerName: String,
@@ -168,6 +185,8 @@ object TtmlParser {
         val backgroundText = StringBuilder()
         var pendingSpaceLead = true
         var pendingSpaceBackground = true
+        var romanization: String? = null
+        var translation: String? = null
         var depth = 1
 
         // The plain-text body, used when the paragraph has no timed spans at all.
@@ -195,6 +214,19 @@ object TtmlParser {
                                 }
                                 backgroundText.append(span.text)
                                 pendingSpaceBackground = span.trailingSpace
+                            }
+                        } else if (role == ROLE_ROMANIZATION || role == ROLE_TRANSLATION) {
+                            val text = readSpanGroup(parser)
+                                .joinToString(" ") { it.text }
+                                .replace(Regex("\\s+"), " ")
+                                .trim()
+                            depth--
+                            if (text.isNotEmpty()) {
+                                if (role == ROLE_ROMANIZATION) {
+                                    romanization = romanization ?: text
+                                } else {
+                                    translation = translation ?: text
+                                }
                             }
                         } else {
                             val spans = readSpanGroup(parser)
@@ -242,6 +274,8 @@ object TtmlParser {
                 syllables = lead,
                 agent = agent,
                 ttmlKey = key,
+                romanized = romanization,
+                translated = translation,
             )
         }
         if (background.isNotEmpty()) {

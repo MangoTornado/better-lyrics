@@ -1,6 +1,8 @@
 package com.betterlyrics.app.lyrics.provider
 
 import com.betterlyrics.app.lyrics.model.LyricsDocument
+import com.betterlyrics.app.util.detectScript
+import com.betterlyrics.app.util.hasLatinLetters
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -90,6 +92,12 @@ interface ProviderCredentials {
     val lrcLibBaseUrl: String
     val neteaseBaseUrl: String
 
+    /**
+     * The community TTML index. Self-hostable, so this is a setting rather than a constant —
+     * the official instance is one volunteer's server and a heavy user should run their own.
+     */
+    val amllBaseUrl: String
+
     /** Optional: raises NetEase's per-IP limits and unlocks some regional catalogues. */
     val neteaseCookie: String?
 
@@ -178,10 +186,17 @@ object Matching {
             similarity(request.title, candidateTitle),
             similarity(request.cleanTitle, cleanTrackTitle(candidateTitle)),
         )
-        val artistScore = if (request.artist.isBlank() || candidateArtist.isBlank()) {
-            0.5f
-        } else {
-            maxOf(
+        val artistScore = when {
+            request.artist.isBlank() || candidateArtist.isBlank() -> 0.5f
+
+            // Two names for the same person in different scripts — `Kenshi Yonezu`
+            // against `米津玄師` — share no characters at all, so letter similarity reads
+            // as a flat contradiction when it is really an absence of evidence. Scoring
+            // it zero rejects correct matches from catalogues that index in the original
+            // script; treating it as unknown lets the title and duration decide.
+            !comparableScripts(request.artist, candidateArtist) -> 0.5f
+
+            else -> maxOf(
                 similarity(request.artist, candidateArtist),
                 similarity(request.primaryArtist, candidateArtist),
                 if (candidateArtist.containsFold(request.primaryArtist)) 1f else 0f,
@@ -200,6 +215,17 @@ object Matching {
             }
         }
         return titleScore * 0.5f + artistScore * 0.3f + durationScore * 0.2f
+    }
+
+    /**
+     * Whether two names are written in scripts that can meaningfully be compared letter
+     * by letter. A Latin name and a CJK, Cyrillic or Greek one cannot be.
+     */
+    private fun comparableScripts(a: String, b: String): Boolean {
+        // A mixed name — `YOASOBI` credited as `YOASOBI (ヨアソビ)` — still has Latin in
+        // common, so the usual comparison holds.
+        if (hasLatinLetters(a) && hasLatinLetters(b)) return true
+        return detectScript(a) == detectScript(b)
     }
 
     private fun String.containsFold(other: String): Boolean =
