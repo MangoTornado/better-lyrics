@@ -111,10 +111,11 @@ fun WelcomeSheet(
             Step(
                 number = "2",
                 title = "No tokens needed for most music",
-                body = "Three sources work immediately, with no account and no setup:\n\n" +
+                body = "Four sources work immediately, with no account and no setup:\n\n" +
                     "•  AMLL TTML Database — community-timed word-by-word lyrics, made by " +
                     "hand and released to the public domain\n" +
                     "•  LRCLIB — open community database\n" +
+                    "•  Musixmatch — word-by-word for most Western music\n" +
                     "•  NetEase — word-by-word for East Asian music, with hand-checked " +
                     "romanization and translation\n\nTranslations that come with the lyrics " +
                     "are shown as they are. Translating into a language of your own choosing " +
@@ -135,10 +136,9 @@ fun WelcomeSheet(
                     "•  Apple Music developer + user token — the best data there is: " +
                     "syllable timings with official romanizations and translations. Needs a " +
                     "subscription.\n\n" +
-                    "•  Musixmatch user token — required rather than optional now: the " +
-                    "anonymous token their web player used to hand out is no longer issued. " +
-                    "With one, Musixmatch is the best source of word-by-word timings for " +
-                    "Western music.\n\n" +
+                    "Musixmatch is not on this list: it mints an anonymous token for itself, " +
+                    "and that is the only kind its lyrics endpoint currently accepts, so " +
+                    "there is nothing useful to paste.\n\n" +
                     "Skip all of them and the app still works. A source with no token stays " +
                     "quiet rather than failing.",
                 accent = accent,

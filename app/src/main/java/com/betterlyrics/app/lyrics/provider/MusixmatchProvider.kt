@@ -68,9 +68,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
 
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
-            // A token the user pasted in from the desktop app covers far more of the
-            // catalogue than the anonymous one, so it always wins when present.
-            val userToken = credentials.musixmatchUserToken?.takeIf { it.isNotBlank() }
+            val userToken = userToken()
             var token = userToken
                 ?: credentials.musixmatchGuestToken
                 ?: obtainToken()?.also { credentials.musixmatchGuestToken = it }
@@ -82,19 +80,58 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
                 }
 
             var macro = macroCall(request, token)
-            if (macro == null && userToken == null) {
-                // The cached anonymous token may have aged out; one retry with a fresh one.
-                token = obtainToken() ?: run {
-                    anonymousTokenDead = true
+            if (macro == null) {
+                // Either the cached anonymous token aged out, or the user pasted one that
+                // this endpoint will not accept. Both are answered the same way: mint a
+                // fresh anonymous token and try once more. A wrong paste must not be able
+                // to break a source that works perfectly well without one.
+                val fresh = obtainToken()
+                if (fresh == null) {
+                    if (userToken == null) anonymousTokenDead = true
                     return@withContext null
                 }
-                credentials.musixmatchGuestToken = token
+                credentials.musixmatchGuestToken = fresh
+                token = fresh
                 macro = macroCall(request, token)
             }
             if (macro == null) return@withContext null
 
             documentFrom(macro, request, token)
         }
+
+    /**
+     * The user's own token, from whatever they pasted into the settings field.
+     *
+     * Accepts either a bare token or the whole `musixmatchUserToken` cookie from
+     * musixmatch.com, because that is what a person actually has to hand — a URL-encoded
+     * JSON map of one token per client id.
+     *
+     * Only the entry for [APP_ID] is any use. The tokens on that cookie are scoped to the
+     * client they were issued for: sending the site's `web-desktop-app-v1.0` token to this
+     * host answers `401 renew`, and sending it to the old desktop host answers 200 with the
+     * lyrics of an unrelated song. So a cookie without an [APP_ID] entry — which is every
+     * cookie the website hands out today — yields nothing, and the anonymous token the app
+     * mints for itself is used instead.
+     */
+    private fun userToken(): String? {
+        val raw = credentials.musixmatchUserToken?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return null
+
+        // A bare token: hex, and nothing that could be JSON or a cookie.
+        if (!raw.contains('{') && !raw.contains('=') && raw.isUsableToken()) return raw
+
+        val decoded = runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+        // The cookie may arrive on its own or in a whole `name=value; name=value` string.
+        val json = decoded.substringAfter("musixmatchUserToken=", decoded)
+            .substringBefore(';')
+            .trim()
+
+        return runCatching {
+            Json.parseToJsonElement(json).jsonObject["tokens"]?.jsonObject
+                ?.get(APP_ID)?.jsonPrimitive?.contentOrNull
+                ?.takeIf { it.isUsableToken() }
+        }.getOrNull()
+    }
 
     /**
      * Mint an anonymous token.
