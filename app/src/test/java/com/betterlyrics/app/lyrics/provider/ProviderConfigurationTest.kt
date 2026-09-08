@@ -33,9 +33,16 @@ class ProviderConfigurationTest {
     }
 
     @Test
-    fun `spotify needs the sp_dc cookie`() {
+    fun `spotify is unavailable whatever cookie you have`() {
+        // Spotify closed the token endpoint to third parties, so the provider must report
+        // itself unusable rather than being asked once per track and failing quietly. If
+        // this test starts failing because the flag was flipped back, the cookie check
+        // below is what should be asserted instead.
         assertFalse(SpotifyLyricsProvider(FakeCredentials()).isConfigured)
-        assertTrue(SpotifyLyricsProvider(FakeCredentials(spDcCookie = "abc")).isConfigured)
+        assertFalse(SpotifyLyricsProvider(FakeCredentials(spDcCookie = "abc")).isConfigured)
+        assertTrue(
+            SpotifyLyricsProvider(FakeCredentials(spDcCookie = "abc")).unavailableReason != null,
+        )
     }
 
     @Test

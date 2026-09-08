@@ -130,9 +130,9 @@ fun WelcomeSheet(
                 title = "Tokens are optional, and each adds something",
                 body = "All of these live in Settings → Tokens and endpoints, and stay on " +
                     "this device:\n\n" +
-                    "•  Spotify sp_dc cookie — Spotify's own lyrics, matched to the exact " +
-                    "track instead of guessed from its title. Also unlocks the artist image, " +
-                    "the full-size cover art and the song's tempo.\n\n" +
+                    "•  Spotify sp_dc cookie — no longer works, and not because of anything " +
+                    "you did: Spotify closed the endpoint that turned the cookie into a " +
+                    "token, to everything but their own player. Nothing to paste.\n\n" +
                     "•  Apple Music developer + user token — the best data there is: " +
                     "syllable timings with official romanizations and translations. Needs a " +
                     "subscription.\n\n" +

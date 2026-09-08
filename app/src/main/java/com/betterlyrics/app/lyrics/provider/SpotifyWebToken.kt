@@ -19,6 +19,30 @@ import kotlinx.serialization.json.longOrNull
  */
 object SpotifyWebToken {
 
+    /**
+     * Spotify has closed this route, and said so.
+     *
+     * `open.spotify.com/get_access_token` answers `403 URL Blocked` at the CDN, and
+     * `open.spotify.com/api/token` answers 400 with:
+     *
+     * > Usage of this endpoint is not permitted under the Spotify Developer Terms and
+     * > Developer Policy, and applicable law
+     *
+     * Identically, with or without a cookie — so it is the endpoint, not anybody's session.
+     * The web player still gets a token by signing its request with a time-based code
+     * derived from a secret in its own JavaScript. Reproducing that would be working around
+     * an access control whose owner has explicitly said not to, so this app does not.
+     *
+     * The code below is kept rather than deleted: it is correct, it costs nothing, and if
+     * Spotify opens the endpoint again this constant is the only thing that needs to change.
+     */
+    const val BLOCKED_BY_SPOTIFY = true
+
+    /** What to tell the user, in Settings and in the source diagnostic. */
+    const val BLOCKED_REASON =
+        "Spotify closed this endpoint to anything but its own web player — no cookie works"
+
+
     const val WEB_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -46,6 +70,7 @@ object SpotifyWebToken {
     }
 
     private suspend fun mint(credentials: ProviderCredentials): String? {
+        if (BLOCKED_BY_SPOTIFY) return null
         val cookie = credentials.spDcCookie?.takeIf { it.isNotBlank() } ?: return null
         val headers = mapOf(
             "Cookie" to "sp_dc=$cookie",

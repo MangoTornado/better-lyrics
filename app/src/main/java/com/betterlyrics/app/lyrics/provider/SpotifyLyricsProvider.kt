@@ -20,9 +20,11 @@ import kotlinx.serialization.json.longOrNull
  * Spotify's own lyrics (`color-lyrics/v2`) — the exact same lines the Spotify app
  * shows, matched to the exact track that is playing rather than guessed from a title.
  *
- * Needs one thing from the user: the `sp_dc` cookie from a signed-in
- * open.spotify.com session, pasted into settings. Without it this provider stays
- * dormant. It is an internal endpoint, so treat a failure as ordinary.
+ * **Unavailable.** It needed a web access token minted from the user's `sp_dc` cookie, and
+ * Spotify has closed that off to everything but its own player — see
+ * [SpotifyWebToken.BLOCKED_BY_SPOTIFY]. The provider reports itself unusable rather than
+ * being asked on every track and failing quietly, and the code stays intact in case that
+ * changes.
  */
 class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : LyricsProvider {
 
@@ -30,7 +32,10 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
     override val displayName = "Spotify"
 
     override val isConfigured: Boolean
-        get() = !credentials.spDcCookie.isNullOrBlank()
+        get() = !SpotifyWebToken.BLOCKED_BY_SPOTIFY && !credentials.spDcCookie.isNullOrBlank()
+
+    override val unavailableReason: String?
+        get() = SpotifyWebToken.BLOCKED_REASON.takeIf { SpotifyWebToken.BLOCKED_BY_SPOTIFY }
 
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {

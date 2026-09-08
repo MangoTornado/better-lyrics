@@ -81,6 +81,15 @@ interface LyricsProvider {
      */
     val isConfigured: Boolean get() = true
 
+    /**
+     * Why this provider cannot be used, when the reason is not simply a missing token.
+     *
+     * For a source that has been closed off at the other end: "you have not set this up" and
+     * "this no longer exists" are different things to be told, and the second one is not the
+     * user's to fix.
+     */
+    val unavailableReason: String? get() = null
+
     /** Returns null when this provider simply has nothing for the track. */
     suspend fun fetch(request: LyricsRequest): LyricsDocument?
 }

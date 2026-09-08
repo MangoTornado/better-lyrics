@@ -117,7 +117,7 @@ private val PROVIDER_INFO = mapOf(
     "spotify" to ProviderInfo(
         "Spotify",
         "The lyrics the Spotify app shows, matched to the exact track.",
-        needs = "Needs your sp_dc cookie below",
+        needs = "Unavailable — Spotify closed the endpoint this needed",
     ),
     "netease" to ProviderInfo(
         "NetEase Cloud Music",
@@ -287,14 +287,18 @@ fun SettingsSheet(
                     subtitle = if (container.spotifyExtrasAvailable) {
                         "Artist image, full-size cover art, and pacing the background to the tempo"
                     } else {
-                        "Needs the Spotify cookie below"
+                        "Unavailable — Spotify closed the endpoint this needed"
                     },
                     checked = settings.useSpotifyExtras,
                     accent = accent,
                     onCheckedChange = { store.setUseSpotifyExtras(it) },
                 )
                 Help(
-                    "One small request per track against Spotify's own API, using the cookie below. It gets the artist's photo, the cover at full size instead of the thumbnail a media session publishes, and the tempo — which paces how fast the background drifts.",
+                    "The artist's photo, the cover at full size rather than the thumbnail a " +
+                        "media session publishes, and the tempo — which paces how fast the " +
+                        "background drifts. All of it came through the same web token as " +
+                        "Spotify's lyrics, so all of it stopped when that endpoint closed. " +
+                        "Cover art still comes from whatever the player publishes.",
                 )
 
                 ToggleRow(
@@ -747,10 +751,15 @@ fun SettingsSheet(
 
                 SecretField(
                     label = "Spotify sp_dc cookie",
-                    help = "Sign in at open.spotify.com in a browser, copy the sp_dc cookie. It " +
-                        "unlocks Spotify's own lyrics — matched to the exact track rather than " +
-                        "searched for by name — and, with the toggle above, the artist image, " +
-                        "the full-size cover and the song's tempo.",
+                    help = "This no longer does anything, and nothing you paste will change " +
+                        "that. Getting a usable token from the cookie meant an endpoint that " +
+                        "Spotify has since closed: one address is blocked outright, the other " +
+                        "answers \u201cusage of this endpoint is not permitted under the " +
+                        "Spotify Developer Terms\u201d — with or without a cookie, so it is " +
+                        "not your session. Their own player still gets in by signing the " +
+                        "request with a secret from its JavaScript; working around that after " +
+                        "being told not to is not something this app will do. The field stays " +
+                        "in case they reopen it.",
                     value = settings.spDcCookie.orEmpty(),
                     accent = accent,
                     onChange = { store.updateSpDcCookie(it) },

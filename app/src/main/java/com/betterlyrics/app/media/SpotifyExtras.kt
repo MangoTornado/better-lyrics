@@ -50,7 +50,10 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
 
     /** True when a cookie is present, so the caller knows whether to bother asking. */
     val isAvailable: Boolean
-        get() = !credentials.spDcCookie.isNullOrBlank()
+        // Same web token as the lyrics, so the same closed door: the artist image, the
+        // full-size cover and the tempo all came through it.
+        get() = !com.betterlyrics.app.lyrics.provider.SpotifyWebToken.BLOCKED_BY_SPOTIFY &&
+            (!credentials.spDcCookie.isNullOrBlank())
 
     private val extrasCache = LinkedHashMap<String, TrackExtras>()
     private val bitmapCache = LinkedHashMap<String, Bitmap>()

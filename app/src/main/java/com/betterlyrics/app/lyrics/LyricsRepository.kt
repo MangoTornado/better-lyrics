@@ -251,8 +251,11 @@ class LyricsRepository(
 
             when {
                 !enabled -> SourceReport(provider.id, provider.displayName, "Off in settings")
-                !provider.isConfigured ->
-                    SourceReport(provider.id, provider.displayName, "Skipped — needs a token")
+                !provider.isConfigured -> SourceReport(
+                    provider.id,
+                    provider.displayName,
+                    provider.unavailableReason ?: "Skipped — needs a token",
+                )
 
                 else -> {
                     val started = System.currentTimeMillis()
