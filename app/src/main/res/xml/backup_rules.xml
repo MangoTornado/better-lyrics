@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings and any lyrics files the user imported themselves are worth keeping across a
+  restore. The lyrics cache lives in cacheDir, which Android never backs up, so it needs
+  no rule of its own.
+-->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <include domain="file" path="local-lyrics" />
+</full-backup-content>

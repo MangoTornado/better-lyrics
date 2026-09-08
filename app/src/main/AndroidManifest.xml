@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Android 11+ hides other installed apps from us. We do not need to *launch* other
+      apps to work — the media session is enough — but we do want to name the player in
+      the UI and offer to open it, so declare an interest in the two things a music app
+      publishes. Deliberately not QUERY_ALL_PACKAGES: it is far more access than naming
+      a player warrants, and the fallback reads fine without it.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MEDIA_BUTTON" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MUSIC" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".BetterLyricsApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.BetterLyrics"
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="34">
+
+        <!--
+          supportsPictureInPicture + resizeableActivity are what let the lyrics carry on
+          in a floating window when you leave the app. configChanges has to cover
+          screenSize and smallestScreenSize or the activity is recreated on the way into
+          the window, which would restart the animation and lose the scroll position.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|smallestScreenSize"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/Theme.BetterLyrics">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Lets the user open a .lrc / .ttml / .lrcx file straight into the app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The whole point of this service is the permission it declares: once the
+          user grants "notification access", the system lets us call
+          MediaSessionManager.getActiveSessions(), which is how we see what is
+          playing in Spotify (or any other player) and where its playhead is.
+        -->
+        <service
+            android:name=".media.MediaNotificationListener"
+            android:exported="true"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
