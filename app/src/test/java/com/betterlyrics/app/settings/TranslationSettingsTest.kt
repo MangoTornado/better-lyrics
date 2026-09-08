@@ -65,20 +65,29 @@ class TranslationSettingsTest {
         val store = store()
         store.setTranslationSource(TranslationSource.DEVICE)
 
-        store.toggleTranslation()
+        store.toggleTranslation(providerHasTranslation = true)
         assertEquals(TranslationSource.OFF, store.current.translationSource)
 
-        store.toggleTranslation()
+        // Even though the source has one of its own, the explicit choice stands.
+        store.toggleTranslation(providerHasTranslation = true)
         assertEquals(TranslationSource.DEVICE, store.current.translationSource)
     }
 
     @Test
-    fun `the toggle never starts a download on its own`() {
+    fun `the toggle prefers the free source when the track has one`() {
         val store = store()
         store.setTranslationSource(TranslationSource.OFF)
-        // Nothing has ever been chosen, so turning it on must pick the free source rather
-        // than a 30 MB model download the user did not ask for.
-        store.toggleTranslation()
+        store.toggleTranslation(providerHasTranslation = true)
         assertEquals(TranslationSource.PROVIDER, store.current.translationSource)
+    }
+
+    @Test
+    fun `the toggle falls through to the device when the source has none`() {
+        // LRCLIB supplies no translations at all, so "from the source" would make the
+        // button a no-op. Pressing translate has to translate.
+        val store = store()
+        store.setTranslationSource(TranslationSource.OFF)
+        store.toggleTranslation(providerHasTranslation = false)
+        assertEquals(TranslationSource.DEVICE, store.current.translationSource)
     }
 }

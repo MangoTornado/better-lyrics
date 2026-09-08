@@ -195,12 +195,29 @@ fun PlayerScreen(
                         accent = colors.accent,
                         romanizationAvailable = demoMode ||
                             (lyricsState as? LyricsState.Loaded)?.romanizationAvailable == true,
+                        translationAvailable = demoMode ||
+                            (lyricsState as? LyricsState.Loaded)?.translationPossible == true,
                         hasDocument = document != null,
                         popupAvailable = settings.popupLyricsEnabled,
                         onToggleRomanization = {
                             container.settings.setShowRomanization(!settings.showRomanization)
                         },
-                        onToggleTranslation = { container.settings.toggleTranslation() },
+                        onToggleTranslation = {
+                            val loaded = lyricsState as? LyricsState.Loaded
+                            val supplied = loaded?.translationAvailable == true
+                            val now = container.settings.toggleTranslation(supplied)
+                            // Falling through to the on-device translator is the right
+                            // answer but a surprising one, so it is said out loud — and it
+                            // is the moment to mention the download, not after it starts.
+                            if (now == TranslationSource.DEVICE && !supplied) {
+                                Toast.makeText(
+                                    context,
+                                    "This source has no translation — translating on this " +
+                                        "device instead. The first language downloads a model.",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        },
                         onToggleCinema = { container.settings.toggleViewMode() },
                         onSwapSide = { container.settings.toggleMediaPanelSide() },
                         onEnterPopup = onEnterPopup,
@@ -567,7 +584,12 @@ private fun PopupContent(
         val boxWidth = maxWidth
         val boxHeight = maxHeight
         val wide = boxWidth > boxHeight * 1.2f
-        val showArt = settings.popupShowArtwork && artwork != null
+        // Follows the main window rather than deciding for itself: the popup is the same
+        // screen made small, so shrinking it should not add a panel that was not there.
+        // Cinema view is what shows the artwork, so that is the condition.
+        val showArt = settings.popupShowArtwork &&
+            settings.viewMode == ViewMode.CINEMA &&
+            artwork != null
 
         val lyrics: @Composable (Modifier) -> Unit = { mod ->
             if (document != null) {
@@ -632,6 +654,8 @@ private fun ViewControls(
     settings: Settings,
     accent: Color,
     romanizationAvailable: Boolean,
+    /** False hides the translate chip: nothing here could translate this track. */
+    translationAvailable: Boolean,
     hasDocument: Boolean,
     popupAvailable: Boolean,
     onToggleRomanization: () -> Unit,
@@ -676,18 +700,23 @@ private fun ViewControls(
             if (romanizationAvailable) {
                 LabelChip("文A", "Toggle romanization", settings.showRomanization, accent, onToggleRomanization)
             }
-            ActionChip(
-                AppIcons.Translate,
-                // Which source is in use is a Settings decision; here it is on or off.
-                when (settings.translationSource) {
-                    TranslationSource.OFF -> "Show translation"
-                    TranslationSource.PROVIDER -> "Translation from the source — tap to hide"
-                    TranslationSource.DEVICE -> "Translation on this device — tap to hide"
-                },
-                settings.translationSource != TranslationSource.OFF,
-                accent,
-                onToggleTranslation,
-            )
+            // Hidden when neither source could produce one — an English song read in
+            // English has nothing to translate, and a button that cannot work is worse
+            // than no button.
+            if (translationAvailable) {
+                ActionChip(
+                    AppIcons.Translate,
+                    // Which source is in use is a Settings decision; here it is on or off.
+                    when (settings.translationSource) {
+                        TranslationSource.OFF -> "Show translation"
+                        TranslationSource.PROVIDER -> "Translation from the source — tap to hide"
+                        TranslationSource.DEVICE -> "Translation on this device — tap to hide"
+                    },
+                    settings.translationSource != TranslationSource.OFF,
+                    accent,
+                    onToggleTranslation,
+                )
+            }
             ActionChip(
                 AppIcons.Cinema,
                 "Cinema view",

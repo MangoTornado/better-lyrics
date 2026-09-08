@@ -443,19 +443,33 @@ class SettingsStore(context: Context) : ProviderCredentials {
     }
 
     /**
-     * What the chip over the lyrics does: off, or back to whichever source was last in
-     * use. Never silently starts a model download — an install that has never chosen
-     * lands on [TranslationSource.PROVIDER].
+     * What the chip over the lyrics does: off, or back to whichever source was last in use.
+     *
+     * @param providerHasTranslation whether the track on screen actually arrived with one.
+     *   When it did not — LRCLIB supplies none at all, and most Western tracks have none
+     *   anywhere — choosing "from the source" would turn the button into a no-op, so it
+     *   falls through to the on-device translator instead. Pressing a button labelled
+     *   translate should translate.
+     *
+     * @return the source now in use, so the caller can say what happened.
      */
-    fun toggleTranslation() {
-        val current = current.translationSource
-        if (current != TranslationSource.OFF) {
+    fun toggleTranslation(providerHasTranslation: Boolean): TranslationSource {
+        if (current.translationSource != TranslationSource.OFF) {
             setTranslationSource(TranslationSource.OFF)
-            return
+            return TranslationSource.OFF
         }
+
         val last = prefs.getString(KEY_TRANSLATE_LAST, null)
             ?.let { name -> runCatching { enumValueOf<TranslationSource>(name) }.getOrNull() }
-        setTranslationSource(last?.takeIf { it != TranslationSource.OFF } ?: TranslationSource.PROVIDER)
+            ?.takeIf { it != TranslationSource.OFF }
+
+        val next = when {
+            last == TranslationSource.DEVICE -> TranslationSource.DEVICE
+            providerHasTranslation -> TranslationSource.PROVIDER
+            else -> TranslationSource.DEVICE
+        }
+        setTranslationSource(next)
+        return next
     }
 
     fun setTranslationTarget(tag: String) = edit { putString(KEY_TRANSLATE_TARGET, tag) }

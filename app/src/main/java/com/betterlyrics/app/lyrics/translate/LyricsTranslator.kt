@@ -128,6 +128,26 @@ class LyricsTranslator {
             runCatching { translator.close() }
         }
     }
+
+    companion object {
+        /**
+         * Whether [document] could be translated into [targetTag] on this device.
+         *
+         * The same three checks [translate] makes before it starts — a language it can
+         * name, one ML Kit supports, and one that is not already the target. Exposed so
+         * the UI can decide whether a translate button would do anything at all, rather
+         * than offering one that silently does nothing for an English song being read in
+         * English.
+         */
+        fun canTranslate(document: LyricsDocument, targetTag: String): Boolean {
+            val sourceTag = document.language
+                ?: detectScript(document.lines.joinToString("\n") { it.text }).languageTag()
+                ?: return false
+            val source = TranslateLanguage.fromLanguageTag(sourceTag.take(2)) ?: return false
+            val target = TranslateLanguage.fromLanguageTag(targetTag.take(2)) ?: return false
+            return source != target
+        }
+    }
 }
 
 /** Bridges a Play-services [Task] into a coroutine without pulling in another artifact. */

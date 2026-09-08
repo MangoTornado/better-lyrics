@@ -13,6 +13,8 @@ import com.betterlyrics.app.lyrics.provider.LyricsRequest
 import com.betterlyrics.app.lyrics.romanize.Romanizer
 import com.betterlyrics.app.lyrics.translate.LyricsTranslator
 import com.betterlyrics.app.media.TrackInfo
+import com.betterlyrics.app.util.detectScript
+import com.betterlyrics.app.util.needsRomanization
 import com.betterlyrics.app.settings.CacheServerMode
 import com.betterlyrics.app.settings.Settings
 import com.betterlyrics.app.settings.SettingsStore
@@ -43,7 +45,15 @@ sealed interface LyricsState {
         val document: LyricsDocument,
         /** True when a romanization exists and could be shown. */
         val romanizationAvailable: Boolean,
+        /** True when a translation is on screen, or would be if it were switched on. */
         val translationAvailable: Boolean,
+
+        /**
+         * True when a translation could be had at all — supplied with the lyrics, or
+         * within reach of the on-device translator. False for an English song being read
+         * in English, where the button would only ever do nothing.
+         */
+        val translationPossible: Boolean,
         val translating: Boolean = false,
     ) : LyricsState
 }
@@ -82,6 +92,9 @@ class LyricsRepository(
 
     /** Memoised derivations, so toggling romanization is instant after the first time. */
     private val derived = HashMap<String, LyricsDocument>()
+
+    /** Whether each track could be romanized, asked once of the document as fetched. */
+    private val romanizable = HashMap<String, Boolean>()
 
     private var fetchJob: Job? = null
     private var currentRequest: LyricsRequest? = null
@@ -123,6 +136,7 @@ class LyricsRepository(
         fetchJob?.cancel()
         currentRequest = request
         derived.clear()
+        romanizable.clear()
 
         if (request == null || !request.isUsable) {
             base.value = Base.Idle
@@ -178,6 +192,7 @@ class LyricsRepository(
         val request = currentRequest ?: return
         fetchJob?.cancel()
         derived.clear()
+        romanizable.clear()
         base.value = Base.Loading
         fetchJob = scope.launch {
             cache.remove(request.cacheIdentity())
@@ -191,6 +206,7 @@ class LyricsRepository(
         val document = localStore.import(uri, request) ?: return false
         cache.remove(request.cacheIdentity())
         derived.clear()
+        romanizable.clear()
         base.value = Base.Ready(request.cacheIdentity(), document)
         return true
     }
@@ -208,6 +224,7 @@ class LyricsRepository(
     suspend fun clearCache() {
         cache.clear()
         derived.clear()
+        romanizable.clear()
     }
 
     // ---- fetching -----------------------------------------------------------
@@ -356,12 +373,34 @@ class LyricsRepository(
 
         return LyricsState.Loaded(
             document = document,
-            romanizationAvailable = document.hasRomanization ||
-                document.lines.any { it.romanized != null },
+            // Asked of the document as fetched, not as displayed. Deriving it from the
+            // rendered document made the toggle a one-way door: turning romanization off
+            // removed the romanization, which removed the reason to show the button that
+            // turns it back on.
+            romanizationAvailable = romanizationPossible(ready),
             translationAvailable = document.hasTranslation,
+            translationPossible = document.hasTranslation ||
+                LyricsTranslator.canTranslate(ready.document, settings.translationTarget),
             translating = isTranslating,
         )
     }
+
+    /**
+     * Whether this track could be romanized at all — which is not the same question as
+     * whether it currently is.
+     *
+     * True when the lyrics already ship a romanization, or when they are written in a
+     * script that has one. Computed from the fetched document and memoised per track, so
+     * flipping the setting cannot change the answer.
+     */
+    private fun romanizationPossible(ready: Base.Ready): Boolean =
+        romanizable.getOrPut(ready.key) {
+            val document = ready.document
+            document.hasRomanization ||
+                document.lines.any { it.romanized != null } ||
+                document.lines.any { line -> line.syllables.any { it.romanized != null } } ||
+                detectScript(document.lines.joinToString("\n") { it.text }).needsRomanization()
+        }
 
     private suspend fun deriveAnnotated(
         key: String,

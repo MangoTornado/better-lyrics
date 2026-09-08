@@ -77,7 +77,12 @@ class LyricsRenderer(
             abs(flingVelocity) > FLING_STOP_PX_PER_SEC ||
             !scrollSpring.canSleep() ||
             !pressSpring.canSleep() ||
-            pressedIndex >= 0
+            pressedIndex >= 0 ||
+            // A pending snap is work that has not happened yet, and it is only ever
+            // carried out inside a frame. Without this, asking to jump back to the playing
+            // line on a paused screen sets the flag and then never draws the frame that
+            // would act on it — the button does nothing at all.
+            snapNextFrame
 
     private val scrollSpring = Spring(0f, SCROLL_FREQUENCY, SCROLL_DAMPING)
     private val pressSpring = Spring(0f, 2.4f, 0.75f)

@@ -319,10 +319,16 @@ fun SettingsSheet(
                 )
                 ToggleRow(
                     title = "Show the cover in the window",
-                    subtitle = "Off leaves the whole window to the words",
+                    subtitle = "Only in Cinema view · off leaves the whole window to the words",
                     checked = settings.popupShowArtwork,
                     accent = accent,
                     onCheckedChange = { store.setPopupShowArtwork(it) },
+                )
+                Help(
+                    "The floating window follows the main one: it is the same screen made " +
+                        "small, so it shows the cover when Cinema view does and only then. " +
+                        "Shrinking the app should not add a panel that was not on screen a " +
+                        "moment ago.",
                 )
             }
 
