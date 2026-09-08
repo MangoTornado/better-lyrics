@@ -58,6 +58,7 @@ class CredentialStorageTest {
         store.updateNeteaseCookie("ne")
         store.updateAppleDeveloperToken("jwt")
         store.updateAppleMusicUserToken("user")
+        store.updateCacheServerKey("bearer-key")
         store.musixmatchGuestToken = "guest"
         store.cachedSpotifyToken = "access"
         store.cachedSpotifyTokenExpiresAt = 123L

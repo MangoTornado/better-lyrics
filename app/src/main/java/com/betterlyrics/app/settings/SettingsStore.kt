@@ -373,7 +373,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
         developerMode = prefs.getBoolean(KEY_DEVELOPER_MODE, false),
         cacheServerUrl = prefs.trimmed(KEY_CACHE_SERVER_URL),
-        cacheServerKey = prefs.trimmed(KEY_CACHE_SERVER_KEY),
+        cacheServerKey = secrets.trimmed(KEY_CACHE_SERVER_KEY),
         cacheServerMode = prefs.enum(KEY_CACHE_SERVER_MODE, CacheServerMode.PARALLEL),
     )
 
@@ -578,7 +578,13 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_CACHE_SERVER_URL, value?.trim()?.trimEnd('/'))
     }
 
-    fun updateCacheServerKey(value: String?) = edit {
+    /**
+     * A bearer key, so it belongs with the other credentials rather than with the settings.
+     *
+     * It authenticates to a server that may itself be holding an Apple Music token, which
+     * makes it exactly the sort of thing that must not travel in a backup.
+     */
+    fun updateCacheServerKey(value: String?) = editSecrets {
         putString(KEY_CACHE_SERVER_KEY, value?.trim())
     }
 
@@ -701,6 +707,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
             "sp_dc", "sp_access_token", "sp_access_token_expiry",
             "mxm_token", "mxm_user_token",
             "netease_cookie", "apple_dev_token", "apple_user_token",
+            "cache_server_key",
         )
 
         const val KEY_SP_DC = "sp_dc"
