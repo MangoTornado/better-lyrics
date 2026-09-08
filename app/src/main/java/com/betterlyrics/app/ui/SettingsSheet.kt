@@ -125,8 +125,7 @@ private val PROVIDER_INFO = mapOf(
     ),
     "musixmatch" to ProviderInfo(
         "Musixmatch",
-        "Word-by-word for most Western music.",
-        needs = "Needs your own user token below — the anonymous one stopped working",
+        "Word-by-word for most Western music. No account and no token needed.",
     ),
     "lrclib" to ProviderInfo(
         "LRCLIB",
@@ -783,11 +782,15 @@ fun SettingsSheet(
 
                 SecretField(
                     label = "Musixmatch user token",
-                    help = "Optional — the app mints an anonymous one for itself, which covers " +
-                        "most tracks. A signed-in token lifts the rate limit and widens the " +
-                        "catalogue. The desktop app it used to come from is discontinued; sign " +
-                        "in at musixmatch.com, open your browser's developer tools, and read " +
-                        "the usertoken parameter off any /ws/1.1/ request the page makes.",
+                    help = "Leave this empty. The app mints its own anonymous token, and that " +
+                        "is currently the only kind the lyrics endpoint accepts: the desktop " +
+                        "app this used to come from is discontinued, and the tokens on a " +
+                        "signed-in musixmatch.com session belong to the website's own clients, " +
+                        "so the endpoint answers \u201crenew\u201d to every one of them. The " +
+                        "field stays in case that changes — paste a bare token or the whole " +
+                        "musixmatchUserToken cookie and anything usable in it is found — and a " +
+                        "paste the endpoint rejects is ignored rather than allowed to break the " +
+                        "source.",
                     value = settings.musixmatchUserToken.orEmpty(),
                     accent = accent,
                     onChange = { store.updateMusixmatchUserToken(it) },
