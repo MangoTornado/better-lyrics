@@ -76,6 +76,49 @@ class CacheServerExtrasContractTest {
     }
 
     @Test
+    fun `the ISRC is read, because it is the field worth having`() {
+        // The only one that needs no token to be useful: it turns the next lookup of this track
+        // into an exact match instead of a guess between similar titles.
+        assertEquals("JPU901800227", parseCachedExtras(realResponse)?.isrc)
+        // And it is enough on its own — a server that knows only the identity is still worth
+        // hearing from.
+        assertEquals("GBAYE0601498", parseCachedExtras("""{"isrc":"GBAYE0601498"}""")?.isrc)
+    }
+
+    @Test
+    fun `the server's own status is read, including a source this build has never heard of`() {
+        // Captured from GET /v1/status. An unrecognised source is still shown: the point of the
+        // screen is to report what is there, not what this build expects.
+        val body = """
+            {
+             "ok": true, "ms": 940,
+             "sources": [
+              { "id": "amll", "name": "AMLL TTML DB", "ok": true, "ms": 210,
+                "detail": "reachable, 1 result(s) for a known track" },
+              { "id": "apple", "name": "Apple Music", "ok": false,
+                "detail": "Needs appleBearerToken and appleMediaUserToken" },
+              { "id": "something-new", "name": "Something New", "ok": true, "detail": "fine" }
+             ]
+            }
+        """.trimIndent()
+
+        val sources = parseServerStatus(body)
+        assertEquals(3, sources?.size)
+        assertEquals(true, sources?.first()?.ok)
+        assertEquals(210, sources?.first()?.ms)
+        assertEquals("Apple Music", sources?.get(1)?.name)
+        assertEquals(false, sources?.get(1)?.ok)
+        assertEquals("something-new", sources?.get(2)?.id)
+    }
+
+    @Test
+    fun `a status answer with no sources is nothing`() {
+        assertNull(parseServerStatus("""{"ok":true}"""))
+        assertNull(parseServerStatus("""{"error":"unauthorised"}"""))
+        assertNull(parseServerStatus("not json"))
+    }
+
+    @Test
     fun `a nonsense tempo is refused rather than passed on`() {
         // It paces the animated background; zero or negative would stop or reverse it.
         assertNull(parseCachedExtras("""{"tempo":0}"""))

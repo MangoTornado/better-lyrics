@@ -9,6 +9,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -31,18 +34,60 @@ internal fun parseCachedExtras(body: String): CachedExtras? = runCatching {
         coverUrl = data.extrasString("coverUrl") ?: data.extrasString("cover"),
         artistImageUrl = data.extrasString("artistImageUrl") ?: data.extrasString("artistImage"),
         tempo = data["tempo"]?.jsonPrimitive?.floatOrNull?.takeIf { it > 0f },
-    ).takeIf { it.coverUrl != null || it.artistImageUrl != null || it.tempo != null }
+        isrc = data.extrasString("isrc"),
+    ).takeIf {
+        it.coverUrl != null || it.artistImageUrl != null || it.tempo != null || it.isrc != null
+    }
 }.getOrNull()
 
 private fun kotlinx.serialization.json.JsonObject.extrasString(key: String): String? =
     runCatching { get(key)?.jsonPrimitive?.contentOrNull }.getOrNull()
         ?.takeIf { it.isNotBlank() }
 
+/** One of the server's sources, as the server describes itself. */
+data class ServerSource(
+    val id: String,
+    val name: String,
+    val ok: Boolean,
+    val detail: String,
+    val ms: Int? = null,
+)
+
+/**
+ * Read `GET /v1/status`.
+ *
+ * A source the app does not recognise is still shown: the server may have one this build has
+ * never heard of, and the point of the screen is to report what is there.
+ */
+internal fun parseServerStatus(body: String): List<ServerSource>? = runCatching {
+    val root = Json.parseToJsonElement(body).jsonObject
+    val sources = (root["data"]?.jsonObject ?: root)["sources"]?.jsonArray ?: return@runCatching null
+    sources.mapNotNull { element ->
+        val source = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+        val id = source.extrasString("id") ?: return@mapNotNull null
+        ServerSource(
+            id = id,
+            name = source.extrasString("name") ?: id,
+            ok = source["ok"]?.jsonPrimitive?.booleanOrNull ?: false,
+            detail = source.extrasString("detail") ?: "",
+            ms = source["ms"]?.jsonPrimitive?.intOrNull,
+        )
+    }.takeIf { it.isNotEmpty() }
+}.getOrNull()
+
 /** What a cache server knows about a track besides its words. */
 data class CachedExtras(
     val coverUrl: String? = null,
     val artistImageUrl: String? = null,
     val tempo: Float? = null,
+    /**
+     * The recording's ISRC, if the server has learned one.
+     *
+     * The most valuable field here by a distance, and the only one that needs no token to be
+     * useful: it turns the next lookup of this track into an exact match rather than a guess
+     * between similar titles.
+     */
+    val isrc: String? = null,
 )
 
 /**
@@ -78,6 +123,23 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
         if (cache.size >= CACHE_SIZE) cache.keys.firstOrNull()?.let(cache::remove)
         cache[key] = extras
         extras
+    }
+
+    /**
+     * What the server says it can currently do, source by source.
+     *
+     * The app's own "test the sources" cannot answer this. Pointing it at a server puts every
+     * source behind one hop, and "the server returned no lyrics" covers a source switched off,
+     * a token that expired last week, and a track nobody has transcribed. Those need telling
+     * apart, and only the server can tell them.
+     *
+     * No credential comes back, by design on both sides — only whether one works.
+     */
+    suspend fun status(): List<ServerSource>? = withContext(Dispatchers.IO) {
+        val base = base() ?: return@withContext null
+        runCatching {
+            Http.get("$base/v1/status", headers()) { body -> parseServerStatus(body) }
+        }.getOrNull()
     }
 
     /** Load one of the URLs [fetch] returned. */

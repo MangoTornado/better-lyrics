@@ -19,6 +19,7 @@ import com.betterlyrics.app.settings.CacheServerMode
 import com.betterlyrics.app.settings.Settings
 import com.betterlyrics.app.settings.SettingsStore
 import com.betterlyrics.app.settings.TranslationSource
+import com.betterlyrics.app.media.IsrcStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -74,6 +75,7 @@ class LyricsRepository(
     private val romanizer: Romanizer,
     private val translator: LyricsTranslator,
     private val localStore: LocalLyricsStore,
+    private val isrcStore: IsrcStore,
     private val providers: List<LyricsProvider>,
     private val scope: CoroutineScope,
 ) {
@@ -123,18 +125,55 @@ class LyricsRepository(
 
     // ---- track lifecycle ----------------------------------------------------
 
-    private fun TrackInfo.toRequest() = LyricsRequest(
+    private fun TrackInfo.toRequest(isrc: String? = null) = LyricsRequest(
         title = title,
         artist = artist,
         album = album,
         durationMs = durationMs,
         spotifyTrackId = spotifyTrackId,
+        isrc = isrc,
     )
 
-    fun setTrack(track: TrackInfo?) {
-        val request = track?.takeIf { !it.isEmpty }?.toRequest()
+    /**
+     * Tell the repository a track's ISRC, learned from somewhere that knows.
+     *
+     * If it arrives while that track's lookup is still the current one, the lookup is redone with
+     * it: an ISRC turns AMLL and Apple from a title search into an exact match, and the sources
+     * that had to guess may well have guessed wrong. On a replay it is simply used from the start.
+     */
+    fun noteIsrc(track: TrackInfo, isrc: String) {
+        val request = currentRequest ?: return
+        if (request.cacheIdentity() != track.cacheKey) return
+        if (!request.isrc.isNullOrBlank()) return
 
-        if (request?.cacheIdentity() == currentRequest?.cacheIdentity()) return
+        scope.launch {
+            isrcStore.put(track.cacheKey, isrc)
+            // Only worth redoing if a source that indexes on an ISRC is in play and the answer we
+            // have is not already the best kind.
+            val worthRetrying = (base.value as? Base.Ready)?.document?.kind != LyricsKind.SYLLABLE
+            if (!worthRetrying) return@launch
+            setTrack(track, forceIsrc = isrc)
+        }
+    }
+
+    fun setTrack(track: TrackInfo?) {
+        scope.launch {
+            // The ISRC, if this track has been played before with something that knew it. Read
+            // first because it changes which sources can answer exactly rather than approximately.
+            val isrc = track?.let { isrcStore.get(it.cacheKey) }
+            setTrack(track, forceIsrc = isrc)
+        }
+    }
+
+    private fun setTrack(track: TrackInfo?, forceIsrc: String?) {
+        val request = track?.takeIf { !it.isEmpty }?.toRequest(forceIsrc)
+
+        // The identity ignores the ISRC, so learning one does not make this look like a new track.
+        if (request?.cacheIdentity() == currentRequest?.cacheIdentity() &&
+            request?.isrc == currentRequest?.isrc
+        ) {
+            return
+        }
 
         fetchJob?.cancel()
         currentRequest = request

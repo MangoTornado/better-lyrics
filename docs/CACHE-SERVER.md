@@ -154,6 +154,34 @@ lookup it needs no key from the local network. Answer:
 - Only asked when no token on the phone can answer. A live token is about the track playing now,
   where the server is a record of one that matched before.
 
+## Asking the server about itself
+
+```
+GET {baseUrl}/v1/status
+```
+
+Behind **Developer → Test the server**, next to the one that tests the sources the app reaches
+directly. It reports each of the server's own sources: off, needs a token, token expired, or
+working, with the timing.
+
+It exists because the other test cannot answer this. Pointing the app at a server puts every
+source behind one hop, and "the server returned no lyrics" covers a source switched off, a token
+that expired last week, and a track nobody has transcribed. No key needed from the local network,
+and **no credential comes back** — only whether one works.
+
+```json
+{
+  "ok": true,
+  "sources": [
+    { "id": "amll", "name": "AMLL TTML DB", "ok": true, "ms": 210, "detail": "reachable" },
+    { "id": "spotify", "name": "Spotify", "ok": false, "detail": "the token has expired" }
+  ]
+}
+```
+
+A source the app has never heard of is still shown. The point of the screen is to report what is
+there.
+
 ## What the app does with it
 
 In **Alongside the others** mode the server is asked first, in parallel with every enabled

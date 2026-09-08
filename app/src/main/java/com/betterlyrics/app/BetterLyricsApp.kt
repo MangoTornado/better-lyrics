@@ -38,6 +38,8 @@ import com.betterlyrics.app.media.TrackInfo
 import com.betterlyrics.app.media.AppleArtwork
 import com.betterlyrics.app.media.APPLE_IMAGE_SIZE
 import com.betterlyrics.app.media.CacheServerExtras
+import com.betterlyrics.app.media.IsrcStore
+import com.betterlyrics.app.media.ServerSource
 
 /**
  * Hand-rolled container instead of a DI framework: there are eight objects, they are
@@ -54,6 +56,13 @@ class AppContainer(context: Context) {
     private val romanizer = Romanizer()
     private val translator = LyricsTranslator()
     val localLyrics = LocalLyricsStore(context)
+    /**
+     * ISRCs the app has learned, remembered across launches.
+     *
+     * The tokens that produce them expire; an ISRC does not. So a track played once with a token
+     * in hand — or once against a cache server that had one — is matched exactly from then on.
+     */
+    private val isrcStore = IsrcStore(context)
 
     /** Every provider that exists; Settings decides which are asked and in what order. */
     val providers: List<LyricsProvider> = listOf(
@@ -74,6 +83,7 @@ class AppContainer(context: Context) {
         romanizer = romanizer,
         translator = translator,
         localStore = localLyrics,
+        isrcStore = isrcStore,
         providers = providers,
         scope = scope,
     )
@@ -84,6 +94,7 @@ class AppContainer(context: Context) {
     private val spotifyExtras = SpotifyExtras(settings)
     private val appleArtwork = AppleArtwork(settings)
     private val cacheServerExtras = CacheServerExtras(settings)
+
     private val artworkSearch = ArtworkSearch()
 
     private val _extras = MutableStateFlow(NowPlayingExtras())
@@ -97,6 +108,9 @@ class AppContainer(context: Context) {
 
     /** True when a Spotify cookie is present, so Settings can say whether extras will work. */
     val spotifyExtrasAvailable: Boolean get() = spotifyExtras.isAvailable
+
+    /** What the cache server says about its own sources, for the developer menu. */
+    suspend fun cacheServerStatus(): List<ServerSource>? = cacheServerExtras.status()
 
     /** How much disk the cached lyrics take, for the settings screen. */
     suspend fun lyricsCacheSizeBytes(): Long = cache.sizeBytes()
@@ -193,6 +207,10 @@ class AppContainer(context: Context) {
             // a 503 here would otherwise take down the whole collector.
             val details = runCatching { spotifyExtras.extrasFor(trackId) }.getOrNull()
             if (details != null) {
+                // The token expires within the hour; this does not.
+                details.isrc?.let { isrc ->
+                    media.snapshot.value.track?.let { lyrics.noteIsrc(it, isrc) }
+                }
                 // Publish the tempo straight away; the images arrive when they arrive.
                 _extras.value = NowPlayingExtras(trackId = trackId, tempo = details.tempo)
 
@@ -239,6 +257,9 @@ class AppContainer(context: Context) {
         // No token at all. Whatever the server found for itself, back when it had one.
         if (!settingsNow.cacheServerExtrasActive) return
         val cached = runCatching { cacheServerExtras.fetch(track) }.getOrNull() ?: return
+        // The server has been collecting these from its own tokens. This is how a phone with none
+        // still gets an exact match.
+        cached.isrc?.let { lyrics.noteIsrc(track, it) }
         val cover = cached.coverUrl?.let { url ->
             runCatching { cacheServerExtras.image(url) }.getOrNull()
         }

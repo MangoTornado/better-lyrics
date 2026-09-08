@@ -72,6 +72,7 @@ import com.betterlyrics.app.R
 import com.betterlyrics.app.update.UpdateChecker
 import com.betterlyrics.app.update.Updater
 import com.betterlyrics.app.settings.ArtworkSource
+import com.betterlyrics.app.media.ServerSource
 
 /**
  * Whether the long-form explanations are showing.
@@ -1240,6 +1241,73 @@ fun SettingsSheet(
                             "impossible to act on. This asks each one directly, ignoring the " +
                             "cache, and prints what it said.",
                     )
+
+                        // ---- and what the server says about its own ------------------
+                    var serverProbe by remember { mutableStateOf<List<ServerSource>?>(null) }
+                    var serverProbing by remember { mutableStateOf(false) }
+                    var serverFailed by remember { mutableStateOf(false) }
+
+                    ActionRow(
+                        title = if (serverProbing) "Asking the server…" else "Test the server",
+                        subtitle = "Asks your server which of its own sources and tokens work",
+                        accent = accent,
+                        onClick = {
+                            if (!serverProbing) {
+                                scope.launch {
+                                    serverProbing = true
+                                    serverFailed = false
+                                    val result = runCatching {
+                                        container.cacheServerStatus()
+                                    }.getOrNull()
+                                    serverProbe = result
+                                    serverFailed = result == null
+                                    serverProbing = false
+                                }
+                            }
+                        },
+                    )
+                    Help(
+                        "The test above cannot answer this one. Pointing the app at a server puts " +
+                            "every source behind one hop, and \u201cthe server returned no " +
+                            "lyrics\u201d covers a source switched off, a token that expired last " +
+                            "week, and a track nobody has transcribed — which need telling apart. " +
+                            "This asks the server to test each of its own sources and report back. " +
+                            "No token comes back, only whether one works.",
+                    )
+
+                    if (serverFailed) {
+                        Hint(
+                            "No answer. Check the URL and, if the server is not on this network, " +
+                                "the key.",
+                        )
+                    }
+
+                    serverProbe?.forEach { source ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                source.name,
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.width(112.dp),
+                            )
+                            Text(
+                                buildString {
+                                    append(if (source.ok) "✓ " else "· ")
+                                    append(source.detail.ifBlank { if (source.ok) "working" else "no" })
+                                    source.ms?.let { append(" (").append(it).append("ms)") }
+                                },
+                                color = Color.White.copy(
+                                    alpha = if (source.ok) 0.7f else 0.5f,
+                                ),
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
 
                     probe?.forEach { report ->
                         Row(

@@ -21,6 +21,15 @@ data class LyricsRequest(
     val album: String,
     val durationMs: Long,
     val spotifyTrackId: String? = null,
+    /**
+     * The recording's ISRC, when it has been learned.
+     *
+     * Worth more than any amount of name matching: it identifies the recording globally, so a
+     * source that indexes on it — AMLL does, Apple filters on it — becomes an exact lookup rather
+     * than a guess between similar titles. Android does not publish one, so it arrives from
+     * Spotify or from a cache server and is remembered.
+     */
+    val isrc: String? = null,
 ) {
     val durationSeconds: Int get() = (durationMs / 1000).toInt()
 

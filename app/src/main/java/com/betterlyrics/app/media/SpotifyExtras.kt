@@ -43,9 +43,11 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
         val tempo: Float? = null,
         /** Overall loudness in dB (negative); a rough stand-in for energy. */
         val loudness: Float? = null,
+        /** Identifies the recording, so a later lookup can be exact instead of a guess. */
+        val isrc: String? = null,
     ) {
         val hasAnything: Boolean
-            get() = artistImageUrl != null || coverUrl != null || tempo != null
+            get() = artistImageUrl != null || coverUrl != null || tempo != null || isrc != null
     }
 
     /** True when a cookie is present, so the caller knows whether to bother asking. */
@@ -82,6 +84,7 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
             coverUrl = track?.coverUrl,
             tempo = analysis?.first,
             loudness = analysis?.second,
+            isrc = track?.isrc,
         )
         if (extras.hasAnything) remember(extrasCache, trackId, extras)
         extras.takeIf { it.hasAnything }
@@ -104,7 +107,17 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
         bitmap
     }
 
-    private class TrackDetails(val artistId: String?, val coverUrl: String?)
+    private class TrackDetails(
+        val artistId: String?,
+        val coverUrl: String?,
+        /**
+         * The recording's ISRC, from the same response as the cover.
+         *
+         * The reason to bother: the token that fetched it expires within the hour, and the ISRC
+         * never does. One track played with a token in hand is matched exactly for good.
+         */
+        val isrc: String?,
+    )
 
     private suspend fun trackDetails(trackId: String, token: String): TrackDetails? =
         Http.get("$WEB_API/tracks/$trackId", bearer(token)) { body ->
@@ -115,7 +128,9 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
                 // Spotify returns images widest-first.
                 val cover = root["album"]?.jsonObject?.get("images")?.jsonArray
                     ?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
-                TrackDetails(artistId, cover)
+                val isrc = root["external_ids"]?.jsonObject
+                    ?.get("isrc")?.jsonPrimitive?.contentOrNull
+                TrackDetails(artistId, cover, isrc)
             }.getOrNull()
         }
 

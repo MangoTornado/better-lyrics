@@ -21,11 +21,13 @@ import kotlinx.serialization.json.longOrNull
  * same syllable timings, duet agents, background vocals, romanizations and translations
  * Apple's own lyrics do, because that is the format they are authored in.
  *
- * Two lookups, in order of confidence:
+ * Three lookups, in order of confidence:
  *
- * 1. **By Spotify track id**, when the media session gave us one. An exact match on the
- *    identity of the recording — no title guessing, no wrong-song risk.
- * 2. **By title and artist**, scored like every other search provider, for everything else.
+ * 1. **By ISRC**, when one has been learned. The strongest identity there is: it names the
+ *    recording itself, independently of any service, and the database indexes on it.
+ * 2. **By Spotify track id**, when the media session gave us one. Also exact — no title
+ *    guessing, no wrong-song risk.
+ * 3. **By title and artist**, scored like every other search provider, for everything else.
  *
  * https://github.com/amll-dev/amll-ttml-db · https://amll.dev
  */
@@ -38,6 +40,11 @@ class AmllTtmlProvider(private val credentials: ProviderCredentials) : LyricsPro
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
             val base = credentials.amllBaseUrl.trimEnd('/')
+
+            request.isrc
+                ?.takeIf { it.isNotBlank() }
+                ?.let { get(base, "isrc=${Http.encode(it)}") }
+                ?.let { return@withContext it.toDocument() }
 
             request.spotifyTrackId
                 ?.let { get(base, "spotifyId=${Http.encode(it)}") }

@@ -57,6 +57,21 @@ class AppleMusicProvider(private val credentials: ProviderCredentials) : LyricsP
 
     private suspend fun search(request: LyricsRequest): String? {
         val storefront = credentials.appleStorefront.ifBlank { "us" }
+
+        // An ISRC names the recording itself, so Apple can be asked for exactly it rather than
+        // for something with a similar title. No scoring needed, and no wrong-song risk.
+        request.isrc?.takeIf { it.isNotBlank() }?.let { isrc ->
+            val url = "$API_BASE/v1/catalog/$storefront/songs" +
+                "?filter[isrc]=${Http.encode(isrc)}&limit=1"
+            Http.get(url, headers()) { body ->
+                runCatching {
+                    Json.parseToJsonElement(body).jsonObject["data"]?.jsonArray
+                        ?.firstOrNull()?.jsonObject
+                        ?.get("id")?.jsonPrimitive?.contentOrNull
+                }.getOrNull()
+            }?.let { return it }
+        }
+
         val queries = buildList {
             if (request.artist.isNotBlank()) add("${request.title} ${request.primaryArtist}")
             if (request.cleanTitle != request.title) {
