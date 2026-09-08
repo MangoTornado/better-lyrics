@@ -125,7 +125,8 @@ private val PROVIDER_INFO = mapOf(
     ),
     "musixmatch" to ProviderInfo(
         "Musixmatch",
-        "Word-by-word for most Western music. No account and no token needed.",
+        "Word-by-word for most Western music. No account needed; a signed-in token avoids " +
+            "the anonymous rate limit.",
     ),
     "lrclib" to ProviderInfo(
         "LRCLIB",
@@ -782,15 +783,16 @@ fun SettingsSheet(
 
                 SecretField(
                     label = "Musixmatch user token",
-                    help = "Leave this empty. The app mints its own anonymous token, and that " +
-                        "is currently the only kind the lyrics endpoint accepts: the desktop " +
-                        "app this used to come from is discontinued, and the tokens on a " +
-                        "signed-in musixmatch.com session belong to the website's own clients, " +
-                        "so the endpoint answers \u201crenew\u201d to every one of them. The " +
-                        "field stays in case that changes — paste a bare token or the whole " +
-                        "musixmatchUserToken cookie and anything usable in it is found — and a " +
-                        "paste the endpoint rejects is ignored rather than allowed to break the " +
-                        "source.",
+                    help = "Optional — the app mints an anonymous token for itself, which is " +
+                        "rate-limited per network. A signed-in one is not. The desktop app " +
+                        "this used to come from is discontinued, so take it from the site: " +
+                        "sign in at musixmatch.com, then copy the whole musixmatchUserToken " +
+                        "cookie from your browser's developer tools and paste it here. The " +
+                        "cookie holds one token per Musixmatch client and only some of them " +
+                        "work, so paste the whole thing rather than picking one — it finds the " +
+                        "right one. A bare token works too if you know which client it belongs " +
+                        "to. Anything this endpoint rejects is ignored rather than allowed to " +
+                        "break the source.",
                     value = settings.musixmatchUserToken.orEmpty(),
                     accent = accent,
                     onChange = { store.updateMusixmatchUserToken(it) },

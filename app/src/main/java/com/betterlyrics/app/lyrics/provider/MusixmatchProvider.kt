@@ -22,6 +22,80 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+/** A Musixmatch token and the client id it was issued for. Neither works without the other. */
+data class Credential(val token: String, val appId: String)
+
+/**
+ * Whether a token from `token.get` is worth keeping.
+ *
+ * The discontinued desktop endpoint answers 200 with fifty-six zeros, and a request carrying
+ * that is accepted and returns lyrics for an unrelated song — asking for Kenshi Yonezu's
+ * "Lemon" came back with Drake. Worse than no token at all, so any token made of a single
+ * repeated character is rejected: the zeros, the older `UpgradeOnly…` placeholder, and
+ * whatever they do next.
+ */
+internal fun String.isUsableToken(): Boolean {
+    val value = trim()
+    if (value.length < 8) return false
+    if (value.startsWith("UpgradeOnly")) return false
+    return value.toSet().size > 1
+}
+
+/**
+ * Read whatever the user pasted into the Musixmatch field.
+ *
+ * Accepts a bare token, or the `musixmatchUserToken` cookie from a signed-in
+ * musixmatch.com session — on its own, URL-encoded or not, or inside a whole
+ * `name=value; name=value` string. That cookie is what a person actually has to hand, and it
+ * carries one token per Musixmatch client, of which only some are accepted by the lyrics
+ * endpoint; picking the right one is this function's job rather than the user's.
+ *
+ * A bare token has no client id attached, so it is paired with the one the app uses. If that
+ * guess is wrong the request fails and the caller falls back to an anonymous token, which is
+ * why pasting the whole cookie is better: it says.
+ */
+internal fun parseMusixmatchCredential(raw: String?): Credential? {
+    val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+
+    // Decode before deciding what this is. A cookie copied out of a browser arrives
+    // percent-encoded, and `%7B%22tokens%22…` contains neither a brace nor an equals sign —
+    // so testing for those first read the whole encoded cookie as one long bare token.
+    val decoded = runCatching { java.net.URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
+    val json = decoded.substringAfter("musixmatchUserToken=", decoded)
+        .substringBefore(';')
+        .trim()
+
+    if (json.startsWith("{")) {
+        val tokens = runCatching {
+            Json.parseToJsonElement(json).jsonObject["tokens"]?.jsonObject
+        }.getOrNull() ?: return null
+
+        for (appId in MusixmatchProvider.PREFERRED_APP_IDS) {
+            val token = tokens[appId]?.jsonPrimitive?.contentOrNull ?: continue
+            if (token.isUsableToken()) return Credential(token, appId)
+        }
+        return null
+    }
+
+    return decoded.takeIf { it.looksLikeToken() }?.let {
+        Credential(it, MusixmatchProvider.APP_ID)
+    }
+}
+
+/**
+ * Whether this could be a token at all, as opposed to a stray line of text.
+ *
+ * Musixmatch tokens are long strings of hex. Without this check, anything the user typed
+ * into the field was sent as a credential — and since a bad user token used to shadow the
+ * anonymous one, a typo was enough to make Musixmatch stop working.
+ */
+private fun String.looksLikeToken(): Boolean {
+    val value = trim()
+    if (value.length < 32) return false
+    if (!value.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) return false
+    return value.isUsableToken()
+}
+
 /**
  * Musixmatch — the widest source of *richsync*, true per-word timings, for Western music.
  *
@@ -30,9 +104,10 @@ import kotlinx.serialization.json.jsonPrimitive
  * fifty-six zeros, which is accepted and returns lyrics for a different song entirely. The
  * mobile one issues real tokens and still reaches richsync.
  *
- * That token is rate-limited per address, so it is minted once and kept. A user token from
- * a signed-in account can be pasted in instead, which raises the limits and widens the
- * catalogue, but is not required.
+ * That anonymous token is rate-limited per address, so it is minted once and kept. A token
+ * from a signed-in musixmatch.com session can be pasted in instead — the whole
+ * `musixmatchUserToken` cookie is accepted, since that is the form a person actually has to
+ * hand — which sidesteps the anonymous rate limit. Not required, though.
  *
  * It is an undocumented endpoint, so every step degrades: no token means no provider, a
  * token that stops working is dropped and re-fetched once, a throttle is reported as the
@@ -68,10 +143,10 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
 
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
-            val userToken = userToken()
-            var token = userToken
-                ?: credentials.musixmatchGuestToken
-                ?: obtainToken()?.also { credentials.musixmatchGuestToken = it }
+            val user = userCredential()
+            var credential = user
+                ?: credentials.musixmatchGuestToken?.let { Credential(it, APP_ID) }
+                ?: obtainToken()?.also { credentials.musixmatchGuestToken = it.token }
                 ?: run {
                     // Asked, and there is nothing usable to be had. Stop claiming to be a
                     // working source for the rest of this run.
@@ -79,24 +154,24 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
                     return@withContext null
                 }
 
-            var macro = macroCall(request, token)
+            var macro = macroCall(request, credential)
             if (macro == null) {
-                // Either the cached anonymous token aged out, or the user pasted one that
-                // this endpoint will not accept. Both are answered the same way: mint a
-                // fresh anonymous token and try once more. A wrong paste must not be able
-                // to break a source that works perfectly well without one.
+                // Either the cached anonymous token aged out, or the user pasted one this
+                // endpoint will not accept. Both are answered the same way: mint a fresh
+                // anonymous token and try once more. A wrong paste must not be able to break
+                // a source that works perfectly well without one.
                 val fresh = obtainToken()
                 if (fresh == null) {
-                    if (userToken == null) anonymousTokenDead = true
+                    if (user == null) anonymousTokenDead = true
                     return@withContext null
                 }
-                credentials.musixmatchGuestToken = fresh
-                token = fresh
-                macro = macroCall(request, token)
+                credentials.musixmatchGuestToken = fresh.token
+                credential = fresh
+                macro = macroCall(request, credential)
             }
             if (macro == null) return@withContext null
 
-            documentFrom(macro, request, token)
+            documentFrom(macro, request, credential)
         }
 
     /**
@@ -113,25 +188,8 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
      * cookie the website hands out today — yields nothing, and the anonymous token the app
      * mints for itself is used instead.
      */
-    private fun userToken(): String? {
-        val raw = credentials.musixmatchUserToken?.trim()?.takeIf { it.isNotEmpty() }
-            ?: return null
-
-        // A bare token: hex, and nothing that could be JSON or a cookie.
-        if (!raw.contains('{') && !raw.contains('=') && raw.isUsableToken()) return raw
-
-        val decoded = runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
-        // The cookie may arrive on its own or in a whole `name=value; name=value` string.
-        val json = decoded.substringAfter("musixmatchUserToken=", decoded)
-            .substringBefore(';')
-            .trim()
-
-        return runCatching {
-            Json.parseToJsonElement(json).jsonObject["tokens"]?.jsonObject
-                ?.get(APP_ID)?.jsonPrimitive?.contentOrNull
-                ?.takeIf { it.isUsableToken() }
-        }.getOrNull()
-    }
+    private fun userCredential(): Credential? =
+        parseMusixmatchCredential(credentials.musixmatchUserToken)
 
     /**
      * Mint an anonymous token.
@@ -143,7 +201,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
      *
      * @throws Http.Unavailable when the endpoint is throttling.
      */
-    private suspend fun obtainToken(): String? {
+    private suspend fun obtainToken(): Credential? {
         val url = "$API/token.get?app_id=$APP_ID&t=${System.currentTimeMillis()}"
         val outcome = Http.get(url, HEADERS) { body ->
             runCatching {
@@ -167,7 +225,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         }
 
         return when (outcome) {
-            is TokenOutcome.Minted -> outcome.token
+            is TokenOutcome.Minted -> Credential(outcome.token, APP_ID)
             is TokenOutcome.Throttled -> throw Http.Unavailable("$API/token.get (${outcome.hint})")
             else -> null
         }
@@ -190,19 +248,12 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
      * of a single repeated character is rejected: the zeros, the older `UpgradeOnly…`
      * placeholder, and whatever they do next.
      */
-    private fun String.isUsableToken(): Boolean {
-        val value = trim()
-        if (value.length < 8) return false
-        if (value.startsWith("UpgradeOnly")) return false
-        return value.toSet().size > 1
-    }
-
-    private suspend fun macroCall(request: LyricsRequest, token: String): JsonObject? {
+    private suspend fun macroCall(request: LyricsRequest, credential: Credential): JsonObject? {
         val url = buildString {
             append("$API/macro.subtitles.get")
             append("?format=json&namespace=lyrics_richsynched&subtitle_format=mxm")
-            append("&app_id=").append(APP_ID)
-            append("&usertoken=").append(Http.encode(token))
+            append("&app_id=").append(credential.appId)
+            append("&usertoken=").append(Http.encode(credential.token))
             append("&q_track=").append(Http.encode(request.cleanTitle))
             append("&q_artist=").append(Http.encode(request.primaryArtist))
             append("&q_artists=").append(Http.encode(request.artist))
@@ -229,7 +280,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
     private suspend fun documentFrom(
         macro: JsonObject,
         request: LyricsRequest,
-        token: String,
+        credential: Credential,
     ): LyricsDocument? {
         val track = macro.call("matcher.track.get")?.get("track")?.jsonObject
         val trackId = track?.get("track_id")?.jsonPrimitive?.contentOrNull
@@ -248,7 +299,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         // 1. Richsync — per-word timings.
         val richsyncBody = macro.call("track.richsync.get")
             ?.get("richsync")?.jsonObject?.get("richsync_body")?.jsonPrimitive?.contentOrNull
-            ?: trackId?.let { fetchRichsync(it, token) }
+            ?: trackId?.let { fetchRichsync(it, credential) }
 
         richsyncBody?.let { body ->
             parseRichsync(body, request.durationMs)?.let { lines ->
@@ -288,9 +339,10 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         }
     }
 
-    private suspend fun fetchRichsync(trackId: String, token: String): String? {
+    private suspend fun fetchRichsync(trackId: String, credential: Credential): String? {
         val url = "$API/track.richsync.get" +
-            "?format=json&app_id=$APP_ID&usertoken=${Http.encode(token)}" +
+            "?format=json&app_id=${credential.appId}" +
+            "&usertoken=${Http.encode(credential.token)}" +
             "&track_id=${Http.encode(trackId)}"
         return Http.get(url, HEADERS) { body ->
             runCatching {
@@ -429,7 +481,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
     private fun JsonElement.asObjectOrNull(): JsonObject? =
         runCatching { jsonObject }.getOrNull()
 
-    private companion object {
+    internal companion object {
         /**
          * The host and client the mobile app uses.
          *
@@ -441,6 +493,36 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
          */
         const val API = "https://apic.musixmatch.com/ws/1.1"
         const val APP_ID = "android-player-v1.0"
+
+        /**
+         * Which client id to take from a pasted `musixmatchUserToken` cookie, in order.
+         *
+         * The cookie holds one token per client, and a token only works with the client it
+         * was issued for. Tested against the live endpoint: on this host almost all of them
+         * work — the same track, the same subtitles, and richsync — with two exceptions
+         * worth encoding rather than rediscovering.
+         *
+         * `web-desktop-app-v1.0` is refused outright (`401 upgrade`), which is the discontinued
+         * desktop client. And the `-dev` and `-pp` variants are staging clients that have no
+         * business being pointed at the live API, so they are not listed at all.
+         *
+         * `android-player-v1.0` leads because it is the one the app mints for itself, and a
+         * cookie that ever starts carrying it should be preferred.
+         */
+        val PREFERRED_APP_IDS = listOf(
+            "android-player-v1.0",
+            "mxm-pro-web-v1.0",
+            "mxm-pro-android-v1.0",
+            "mxm-pro-ios-v1.0",
+            "mxm-com-v1.0",
+            "mxm-account-v1.0",
+            "community-app-v1.0",
+            "mxm-studio-v1.0",
+            "mxm-experiments-v1.0",
+            "musixmatch-podcasts-v2.0",
+            "musixmatch-publishers-v2.0",
+            "mxm-backoffice-v1.0",
+        )
 
         val HEADERS = mapOf(
             "authority" to "apic.musixmatch.com",

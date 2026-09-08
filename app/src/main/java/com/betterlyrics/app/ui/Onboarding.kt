@@ -136,9 +136,10 @@ fun WelcomeSheet(
                     "•  Apple Music developer + user token — the best data there is: " +
                     "syllable timings with official romanizations and translations. Needs a " +
                     "subscription.\n\n" +
-                    "Musixmatch is not on this list: it mints an anonymous token for itself, " +
-                    "and that is the only kind its lyrics endpoint currently accepts, so " +
-                    "there is nothing useful to paste.\n\n" +
+                    "•  Musixmatch cookie — optional. It works without one, using a token it " +
+                    "mints for itself, but that is rate-limited per network. Paste the " +
+                    "musixmatchUserToken cookie from a signed-in musixmatch.com session and " +
+                    "that limit does not apply.\n\n" +
                     "Skip all of them and the app still works. A source with no token stays " +
                     "quiet rather than failing.",
                 accent = accent,
