@@ -5,8 +5,8 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
@@ -117,19 +117,30 @@ fun DynamicBackground(
     val animated = resolved == BackgroundStyle.ANIMATED
 
     // Cross-fade the new cover in, matching the 850 ms cover transition.
+    //
+    // Driven from zero on every change rather than from a null check: once the first cover
+    // was in place `current` stayed non-null, so the target stayed at 1 and no later track
+    // ever faded — it simply cut. An Animatable is snapped to 0 and run up to 1 each time
+    // the artwork changes, which is what the previous layer is drawn against.
     var previous by remember { mutableStateOf<Bitmap?>(null) }
     var current by remember { mutableStateOf<Bitmap?>(null) }
+    val fadeAnim = remember { Animatable(0f) }
     LaunchedEffect(field) {
-        if (current !== field) {
-            previous = current
-            current = field
+        if (current === field) return@LaunchedEffect
+        previous = current
+        current = field
+        if (field == null) {
+            // Nothing to fade to; let the old one go rather than holding it at full strength.
+            fadeAnim.snapTo(0f)
+            previous = null
+            return@LaunchedEffect
         }
+        fadeAnim.snapTo(0f)
+        fadeAnim.animateTo(1f, tween(durationMillis = 850, easing = LinearEasing))
+        // The outgoing cover is only needed while it is still visible.
+        previous = null
     }
-    val fade by animateFloatAsState(
-        targetValue = if (current != null) 1f else 0f,
-        animationSpec = tween(durationMillis = 850, easing = LinearEasing),
-        label = "artworkFade",
-    )
+    val fade = fadeAnim.value
 
     // 120 BPM is the neutral point; the clamp keeps a very slow or very fast song from
     // making the background either static or frantic.

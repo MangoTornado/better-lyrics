@@ -29,7 +29,7 @@ object SpotifyWebToken {
     )
 
     /** Cached until 30 s before expiry, then re-minted. Null when there is no cookie. */
-    fun get(credentials: ProviderCredentials): String? {
+    suspend fun get(credentials: ProviderCredentials): String? {
         val cached = credentials.cachedSpotifyToken
         if (!cached.isNullOrBlank() &&
             credentials.cachedSpotifyTokenExpiresAt > System.currentTimeMillis() + 30_000
@@ -40,12 +40,12 @@ object SpotifyWebToken {
     }
 
     /** Forces a fresh token — call once after a request is refused, then give up. */
-    fun refresh(credentials: ProviderCredentials): String? {
+    suspend fun refresh(credentials: ProviderCredentials): String? {
         credentials.cachedSpotifyToken = null
         return mint(credentials)
     }
 
-    private fun mint(credentials: ProviderCredentials): String? {
+    private suspend fun mint(credentials: ProviderCredentials): String? {
         val cookie = credentials.spDcCookie?.takeIf { it.isNotBlank() } ?: return null
         val headers = mapOf(
             "Cookie" to "sp_dc=$cookie",

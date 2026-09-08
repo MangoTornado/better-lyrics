@@ -140,6 +140,9 @@ dependencies {
 
     // On-device translation (models are downloaded on demand, per language).
     implementation(libs.mlkit.translate)
+    // Which language a lyric is in. Needed because a Latin script says nothing
+    // about that — Spanish, French and English are indistinguishable by alphabet.
+    implementation(libs.mlkit.language.id)
 
     testImplementation(libs.junit)
     // The TTML parser goes through android.util.Xml, so its tests need a real

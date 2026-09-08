@@ -4,6 +4,11 @@ import com.betterlyrics.app.lyrics.model.LyricsDocument
 import com.betterlyrics.app.util.detectScript
 import com.betterlyrics.app.util.hasLatinLetters
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -161,21 +166,63 @@ object Http {
             .build()
 
     /**
-     * Runs [url] and hands the body to [block]. Returns null on any non-2xx or
-     * transport failure: a provider that is down must never break the chain.
+     * Thrown when a service did not answer, as distinct from answering "I do not have it".
+     *
+     * The difference decides whether a miss is worth remembering. `404` means this track
+     * has no lyrics here, and caching that saves everybody a request. A timeout, a DNS
+     * failure, a `503` or a `429` means we still do not know — cache it as a miss and the
+     * track stays blank for two days because an endpoint hiccuped once.
      */
-    inline fun <T> get(
+    class Unavailable(url: String, cause: Throwable? = null) :
+        java.io.IOException("no answer from $url", cause)
+
+    /**
+     * Runs [url] and hands the body to [block].
+     *
+     * Returns null when the service answered and had nothing — a 404, or an empty body.
+     * Throws [Unavailable] when it did not answer at all.
+     *
+     * Enqueued rather than executed: a blocking `execute()` ignores coroutine
+     * cancellation, so the caller's timeout would expire while the socket read carried on
+     * regardless, and a hung endpoint could hold up a whole lookup well past its budget.
+     * This way cancelling the coroutine cancels the call.
+     */
+    suspend fun <T> get(
         url: String,
         headers: Map<String, String> = emptyMap(),
         block: (String) -> T?,
-    ): T? = try {
-        client.newCall(request(url, headers)).execute().use { response: Response ->
-            if (!response.isSuccessful) null else response.body?.string()?.let(block)
+    ): T? = body(url, headers)?.let(block)
+
+    private suspend fun body(url: String, headers: Map<String, String>): String? =
+        suspendCancellableCoroutine { continuation ->
+            val call = client.newCall(request(url, headers))
+            continuation.invokeOnCancellation { runCatching { call.cancel() } }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    if (continuation.isActive) {
+                        continuation.resumeWithException(Unavailable(url, e))
+                    }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    if (!continuation.isActive) {
+                        response.close()
+                        return
+                    }
+                    response.use {
+                        when {
+                            it.isSuccessful -> continuation.resume(it.body?.string())
+                            // Rate limiting and server errors are the service saying "not
+                            // now", which is not the same as "not here".
+                            it.code == 429 || it.code >= 500 ->
+                                continuation.resumeWithException(Unavailable(url))
+
+                            else -> continuation.resume(null)
+                        }
+                    }
+                }
+            })
         }
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        null
-    }
 
     fun encode(value: String): String =
         java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")

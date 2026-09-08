@@ -41,7 +41,7 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
         }
 
     /** Returns the NetEase song id of the best match, or null. */
-    private fun search(request: LyricsRequest): Long? {
+    private suspend fun search(request: LyricsRequest): Long? {
         val queries = buildList {
             if (request.artist.isNotBlank()) add("${request.title} ${request.primaryArtist}")
             add(request.title)
@@ -86,7 +86,7 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
         return null
     }
 
-    private fun lyricsFor(songId: Long, request: LyricsRequest): LyricsDocument? {
+    private suspend fun lyricsFor(songId: Long, request: LyricsRequest): LyricsDocument? {
         // Asking for every variant at once: lv=lyric, kv=karaoke, tv=translation,
         // rv=romanization, yv=word-timed. Servers that don't know a key ignore it.
         val url = credentials.neteaseBaseUrl + "/api/song/lyric" +

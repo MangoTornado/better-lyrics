@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterlyrics.app.media.PlaybackPosition
+import com.betterlyrics.app.media.Transport
 import com.betterlyrics.app.media.TrackInfo
 
 /**
@@ -57,7 +58,7 @@ fun NowBar(
     playback: PlaybackPosition,
     artwork: Bitmap?,
     accent: Color,
-    canControl: Boolean,
+    transport: Transport,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -134,15 +135,18 @@ fun NowBar(
                 )
             }
 
-            if (canControl) {
-                IconButton(onClick = onPrevious) {
+            // Each button asks about its own action: a live stream offers play and pause
+            // but not skip, and a control that is shown and ignored is worse than one that
+            // is visibly unavailable.
+            if (transport.any) {
+                IconButton(onClick = onPrevious, enabled = transport.skipPrevious) {
                     Icon(
                         AppIcons.SkipPrevious,
                         contentDescription = "Previous track",
                         tint = Color.White.copy(alpha = 0.85f),
                     )
                 }
-                IconButton(onClick = onTogglePlay) {
+                IconButton(onClick = onTogglePlay, enabled = transport.playPause) {
                     Icon(
                         if (playback.isPlaying) AppIcons.Pause else AppIcons.PlayArrow,
                         contentDescription = if (playback.isPlaying) "Pause" else "Play",
@@ -150,7 +154,7 @@ fun NowBar(
                         modifier = Modifier.size(30.dp),
                     )
                 }
-                IconButton(onClick = onNext) {
+                IconButton(onClick = onNext, enabled = transport.skipNext) {
                     Icon(
                         AppIcons.SkipNext,
                         contentDescription = "Next track",
@@ -168,6 +172,9 @@ fun NowBar(
         // a thin media scrubber instead of the chunky default.
         Slider(
             value = fraction,
+            // A player that does not accept seeks still shows progress; it just cannot be
+            // dragged.
+            enabled = transport.seek,
             onValueChange = { scrubFraction = it.coerceIn(0f, 1f) },
             onValueChangeFinished = {
                 if (scrubFraction >= 0f) {

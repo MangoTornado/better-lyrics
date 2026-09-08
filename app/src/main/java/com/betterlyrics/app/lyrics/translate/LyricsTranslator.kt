@@ -5,6 +5,7 @@ import com.betterlyrics.app.util.detectScript
 import com.betterlyrics.app.util.languageTag
 import com.google.android.gms.tasks.Task
 import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
@@ -57,6 +58,8 @@ class LyricsTranslator {
         targetTag: String,
         requireWifi: Boolean,
         replaceProvided: Boolean = false,
+        /** The language identified for this track, if it has already been worked out. */
+        sourceTagOverride: String? = null,
         onState: (State) -> Unit = {},
     ): LyricsDocument {
         val outstanding = document.lines.filter {
@@ -65,9 +68,7 @@ class LyricsTranslator {
         }
         if (outstanding.isEmpty()) return document
 
-        val sourceTag = document.language
-            ?: detectScript(document.lines.joinToString("\n") { it.text }).languageTag()
-            ?: return document
+        val sourceTag = sourceTagOverride ?: identify(document) ?: return document
 
         val source = TranslateLanguage.fromLanguageTag(sourceTag.take(2))
             ?: return document
@@ -129,21 +130,58 @@ class LyricsTranslator {
         }
     }
 
+    /**
+     * Work out what language a lyric is in.
+     *
+     * The script alone is not enough and never was: Spanish, French, German and English
+     * share an alphabet, so `detectScript` returns `LATIN` for all of them and has no tag to
+     * offer. That made every Latin-script track untranslatable — the largest group of songs
+     * there is. So when the script cannot answer, ask ML Kit's identifier, which is a small
+     * on-device model with nothing to download.
+     *
+     * Preference order: what the provider declared, then the script (decisive and free for
+     * Japanese, Chinese, Korean, Cyrillic and Greek), then identification.
+     */
+    suspend fun identify(document: LyricsDocument): String? {
+        document.language?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val corpus = document.lines
+            .filterNot { it.isInterlude }
+            .joinToString("\n") { it.text }
+            .trim()
+        if (corpus.isBlank()) return null
+
+        detectScript(corpus).languageTag()?.let { return it }
+
+        val client = LanguageIdentification.getClient()
+        return try {
+            // A few lines is plenty, and keeps a long song from being pointlessly hashed.
+            client.identifyLanguage(corpus.take(IDENTIFY_SAMPLE_CHARS)).await()
+                ?.takeIf { it != UNDETERMINED }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        } finally {
+            runCatching { client.close() }
+        }
+    }
+
     companion object {
+        private const val UNDETERMINED = "und"
+        private const val IDENTIFY_SAMPLE_CHARS = 800
+
         /**
-         * Whether [document] could be translated into [targetTag] on this device.
+         * Whether a track in [sourceTag] could be translated into [targetTag] here.
          *
-         * The same three checks [translate] makes before it starts — a language it can
-         * name, one ML Kit supports, and one that is not already the target. Exposed so
-         * the UI can decide whether a translate button would do anything at all, rather
-         * than offering one that silently does nothing for an English song being read in
-         * English.
+         * The checks [translate] makes before it starts: a language ML Kit supports on both
+         * sides, and not already the target. Exposed so the UI can decide whether a
+         * translate button would do anything at all, rather than offering one that silently
+         * does nothing for an English song being read in English.
          */
-        fun canTranslate(document: LyricsDocument, targetTag: String): Boolean {
-            val sourceTag = document.language
-                ?: detectScript(document.lines.joinToString("\n") { it.text }).languageTag()
-                ?: return false
-            val source = TranslateLanguage.fromLanguageTag(sourceTag.take(2)) ?: return false
+        fun canTranslate(sourceTag: String?, targetTag: String): Boolean {
+            val source = TranslateLanguage.fromLanguageTag(
+                sourceTag?.take(2) ?: return false,
+            ) ?: return false
             val target = TranslateLanguage.fromLanguageTag(targetTag.take(2)) ?: return false
             return source != target
         }

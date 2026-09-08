@@ -264,6 +264,49 @@ class SettingsStore(context: Context) : ProviderCredentials {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("better-lyrics", Context.MODE_PRIVATE)
 
+    /**
+     * Cookies and tokens, kept in their own file so backup can be told to leave them
+     * alone.
+     *
+     * Settings are worth restoring onto a new phone; a signed-in Spotify session is not.
+     * These are live credentials for the user's own accounts, and the app tells them so —
+     * "stays on this device" has to be true, which means it cannot be in a cloud backup or
+     * a device-to-device transfer. Backup rules work per file, so the only way to say it is
+     * to put them in a different one.
+     */
+    private val secrets: SharedPreferences =
+        context.getSharedPreferences(SECRETS_FILE, Context.MODE_PRIVATE)
+
+    init {
+        migrateSecrets()
+    }
+
+    /**
+     * Move credentials written by an earlier version out of the backed-up file.
+     *
+     * Runs once — after it, the keys are gone from `better-lyrics` and this finds nothing.
+     * Anything already carried into a backup is beyond reach here; this stops it happening
+     * again, and re-entering a cookie is a smaller cost than leaving one in the cloud.
+     */
+    private fun migrateSecrets() {
+        val present = SECRET_KEYS.filter { prefs.contains(it) }
+        if (present.isEmpty()) return
+
+        val target = secrets.edit()
+        val source = prefs.edit()
+        for (key in present) {
+            when (val value = prefs.all[key]) {
+                is String -> target.putString(key, value)
+                is Long -> target.putLong(key, value)
+                is Int -> target.putInt(key, value)
+                is Boolean -> target.putBoolean(key, value)
+            }
+            source.remove(key)
+        }
+        target.commit()
+        source.commit()
+    }
+
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<Settings> = _settings.asStateFlow()
 
@@ -318,14 +361,14 @@ class SettingsStore(context: Context) : ProviderCredentials {
             }
             ?: Settings.DEFAULT_PROVIDER_ORDER,
 
-        spDcCookie = prefs.trimmed(KEY_SP_DC),
-        musixmatchUserToken = prefs.trimmed(KEY_MXM_USER_TOKEN),
+        spDcCookie = secrets.trimmed(KEY_SP_DC),
+        musixmatchUserToken = secrets.trimmed(KEY_MXM_USER_TOKEN),
         lrcLibBaseUrl = prefs.trimmed(KEY_LRCLIB_URL) ?: Settings.DEFAULT_LRCLIB_URL,
         neteaseBaseUrl = prefs.trimmed(KEY_NETEASE_URL) ?: Settings.DEFAULT_NETEASE_URL,
         amllBaseUrl = prefs.trimmed(KEY_AMLL_URL) ?: Settings.DEFAULT_AMLL_URL,
-        neteaseCookie = prefs.trimmed(KEY_NETEASE_COOKIE),
-        appleDeveloperToken = prefs.trimmed(KEY_APPLE_DEV_TOKEN),
-        appleMusicUserToken = prefs.trimmed(KEY_APPLE_USER_TOKEN),
+        neteaseCookie = secrets.trimmed(KEY_NETEASE_COOKIE),
+        appleDeveloperToken = secrets.trimmed(KEY_APPLE_DEV_TOKEN),
+        appleMusicUserToken = secrets.trimmed(KEY_APPLE_USER_TOKEN),
         appleStorefront = prefs.trimmed(KEY_APPLE_STOREFRONT) ?: "us",
 
         developerMode = prefs.getBoolean(KEY_DEVELOPER_MODE, false),
@@ -502,14 +545,20 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     // ---- credentials --------------------------------------------------------
 
-    fun updateSpDcCookie(value: String?) = edit {
+    /** Like [edit], but writing to the file backup is told to skip. */
+    private inline fun editSecrets(block: SharedPreferences.Editor.() -> Unit) {
+        secrets.edit().apply(block).apply()
+        _settings.value = read()
+    }
+
+    fun updateSpDcCookie(value: String?) = editSecrets {
         putString(KEY_SP_DC, value?.trim())
         // A new cookie invalidates whatever token the old one minted.
         remove(KEY_SP_TOKEN)
         remove(KEY_SP_TOKEN_EXPIRY)
     }
 
-    fun updateMusixmatchUserToken(value: String?) = edit {
+    fun updateMusixmatchUserToken(value: String?) = editSecrets {
         putString(KEY_MXM_USER_TOKEN, value?.trim())
         // Stop using the anonymous token so the user's own one takes effect at once.
         remove(KEY_MXM_GUEST_TOKEN)
@@ -541,13 +590,14 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_AMLL_URL, value?.trim()?.trimEnd('/'))
     }
 
-    fun updateNeteaseCookie(value: String?) = edit { putString(KEY_NETEASE_COOKIE, value?.trim()) }
+    fun updateNeteaseCookie(value: String?) =
+        editSecrets { putString(KEY_NETEASE_COOKIE, value?.trim()) }
 
     fun updateAppleDeveloperToken(value: String?) =
-        edit { putString(KEY_APPLE_DEV_TOKEN, value?.trim()) }
+        editSecrets { putString(KEY_APPLE_DEV_TOKEN, value?.trim()) }
 
     fun updateAppleMusicUserToken(value: String?) =
-        edit { putString(KEY_APPLE_USER_TOKEN, value?.trim()) }
+        editSecrets { putString(KEY_APPLE_USER_TOKEN, value?.trim()) }
 
     fun updateAppleStorefront(value: String?) = edit {
         putString(KEY_APPLE_STOREFRONT, value?.trim()?.lowercase()?.takeIf { it.length == 2 })
@@ -573,25 +623,25 @@ class SettingsStore(context: Context) : ProviderCredentials {
     override val appleStorefront: String get() = current.appleStorefront
 
     override var musixmatchGuestToken: String?
-        get() = prefs.getString(KEY_MXM_GUEST_TOKEN, null)
+        get() = secrets.getString(KEY_MXM_GUEST_TOKEN, null)
         set(value) {
-            prefs.edit().putString(KEY_MXM_GUEST_TOKEN, value).apply()
+            secrets.edit().putString(KEY_MXM_GUEST_TOKEN, value).apply()
         }
 
     override var spDcCookie: String?
-        get() = prefs.getString(KEY_SP_DC, null)
+        get() = secrets.getString(KEY_SP_DC, null)
         set(value) = updateSpDcCookie(value)
 
     override var cachedSpotifyToken: String?
-        get() = prefs.getString(KEY_SP_TOKEN, null)
+        get() = secrets.getString(KEY_SP_TOKEN, null)
         set(value) {
-            prefs.edit().putString(KEY_SP_TOKEN, value).apply()
+            secrets.edit().putString(KEY_SP_TOKEN, value).apply()
         }
 
     override var cachedSpotifyTokenExpiresAt: Long
-        get() = prefs.getLong(KEY_SP_TOKEN_EXPIRY, 0L)
+        get() = secrets.getLong(KEY_SP_TOKEN_EXPIRY, 0L)
         set(value) {
-            prefs.edit().putLong(KEY_SP_TOKEN_EXPIRY, value).apply()
+            secrets.edit().putLong(KEY_SP_TOKEN_EXPIRY, value).apply()
         }
 
     // Internal rather than private so the migration tests can plant an old install's
@@ -639,6 +689,19 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_PREFETCH_NEXT = "prefetch_next"
         const val KEY_PROVIDERS_ON = "providers_enabled"
         const val KEY_PROVIDER_ORDER = "provider_order"
+
+        /**
+         * The file the credential keys live in. Named in `backup_rules.xml` and
+         * `data_extraction_rules.xml`, which is the whole point of it existing.
+         */
+        const val SECRETS_FILE = "better-lyrics-credentials"
+
+        /** Everything that authenticates as the user. Nothing here may be backed up. */
+        val SECRET_KEYS = listOf(
+            "sp_dc", "sp_access_token", "sp_access_token_expiry",
+            "mxm_token", "mxm_user_token",
+            "netease_cookie", "apple_dev_token", "apple_user_token",
+        )
 
         const val KEY_SP_DC = "sp_dc"
         const val KEY_SP_TOKEN = "sp_access_token"

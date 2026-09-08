@@ -3,6 +3,13 @@ package com.betterlyrics.app.media
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
@@ -46,6 +53,14 @@ class MediaSessionRepository(private val context: Context) {
 
     /** Last time each controller reported that it was playing. Breaks ties. */
     private val lastPlayingAt = HashMap<String, Long>()
+
+    /** Covers fetched from a URI, keyed by it. Small: a handful of recent tracks. */
+    private val artworkCache = LinkedHashMap<String, Bitmap>()
+
+    /** URIs already tried, so a failure is not retried on every metadata change. */
+    private val artworkAttempted = HashSet<String>()
+
+    private val artworkScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var started = false
     private var selected: MediaController? = null
@@ -248,6 +263,10 @@ class MediaSessionRepository(private val context: Context) {
         val art = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: md?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            // Some players publish only a URI. Reading it needs I/O, so it cannot happen
+            // here on the main thread — the snapshot goes out without it and the bitmap
+            // arrives in a later one.
+            ?: artworkCache[track.artworkUri].also { if (it == null) loadArtwork(track) }
 
         return PlayerSnapshot(
             track = track,
@@ -256,7 +275,61 @@ class MediaSessionRepository(private val context: Context) {
             nextTrack = nextInQueue(),
             sourcePackage = packageName,
             sourceLabel = appLabel(packageName),
-            canControl = state != null,
+            transport = state.transport(),
+        )
+    }
+
+    /**
+     * Fetch artwork that was published as a URI rather than a bitmap.
+     *
+     * One attempt per URI, cached, and the result is published by re-running [publish] so
+     * it reaches the UI through the same path as everything else. `content://` covers most
+     * players; `http(s)://` happens too, and both are read the same way through the
+     * resolver's stream.
+     */
+    private fun loadArtwork(track: TrackInfo) {
+        val uri = track.artworkUri?.takeIf { it.isNotBlank() } ?: return
+        if (!artworkAttempted.add(uri)) return
+
+        artworkScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val parsed = android.net.Uri.parse(uri)
+                    when (parsed.scheme) {
+                        "http", "https" ->
+                            java.net.URL(uri).openStream().use { BitmapFactory.decodeStream(it) }
+
+                        else -> context.contentResolver.openInputStream(parsed)
+                            ?.use { BitmapFactory.decodeStream(it) }
+                    }
+                }.getOrNull()
+            } ?: return@launch
+
+            // Bounded: a long listening session must not accumulate covers.
+            if (artworkCache.size >= ARTWORK_CACHE_SIZE) {
+                artworkCache.keys.firstOrNull()?.let(artworkCache::remove)
+            }
+            artworkCache[uri] = bitmap
+            publish()
+        }
+    }
+
+    /**
+     * What this session says it will accept.
+     *
+     * `ACTION_PLAY_PAUSE` is the combined flag some players use instead of naming both, so
+     * either spelling counts.
+     */
+    private fun PlaybackState?.transport(): Transport {
+        val actions = this?.actions ?: return Transport()
+        fun has(flag: Long) = actions and flag != 0L
+        return Transport(
+            playPause = has(PlaybackState.ACTION_PLAY) ||
+                has(PlaybackState.ACTION_PAUSE) ||
+                has(PlaybackState.ACTION_PLAY_PAUSE),
+            skipNext = has(PlaybackState.ACTION_SKIP_TO_NEXT),
+            skipPrevious = has(PlaybackState.ACTION_SKIP_TO_PREVIOUS),
+            seek = has(PlaybackState.ACTION_SEEK_TO),
         )
     }
 
@@ -363,5 +436,6 @@ class MediaSessionRepository(private val context: Context) {
         /** Roughly 0.4 s, 0.8 s, 1.6 s, 3.2 s, 6.4 s — long enough to cover the bind. */
         const val MAX_BIND_ATTEMPTS = 5
         const val BIND_RETRY_BASE_MS = 400L
+        const val ARTWORK_CACHE_SIZE = 6
     }
 }

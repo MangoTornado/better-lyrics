@@ -25,6 +25,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -102,11 +104,20 @@ class AppContainer(context: Context) {
                 .collect { next -> lyrics.prefetchNext(next) }
         }
 
+        // Keyed on the settings as well as the track: turning "use extras from Spotify"
+        // off has to drop the artist image and tempo now rather than at the next track, and
+        // pasting a cookie has to take effect on what is playing rather than being invisible
+        // until the song changes.
         scope.launch {
-            media.snapshot
-                .map { it.track?.spotifyTrackId }
+            combine(
+                media.snapshot.map { it.track?.spotifyTrackId },
+                settings.settings.map { it.useSpotifyExtras to it.spDcCookie },
+            ) { trackId, (enabled, cookie) -> Triple(trackId, enabled, cookie) }
                 .distinctUntilChanged()
-                .collect { trackId -> loadExtras(trackId) }
+                // collectLatest, not collect: a track change must abandon the previous
+                // track's downloads instead of queueing behind them, or the tempo of the
+                // song that just ended gets applied to the one that just started.
+                .collectLatest { (trackId, _, _) -> loadExtras(trackId) }
         }
     }
 
@@ -114,12 +125,16 @@ class AppContainer(context: Context) {
         _extras.value = NowPlayingExtras()
         if (trackId == null || !settings.current.useSpotifyExtras) return
 
-        val details = spotifyExtras.extrasFor(trackId) ?: return
+        // Spotify's endpoints now report an outage by throwing rather than returning null,
+        // so a 503 here would otherwise take down the whole collector.
+        val details = runCatching { spotifyExtras.extrasFor(trackId) }.getOrNull() ?: return
         // Publish the tempo straight away; the images arrive when they arrive.
         _extras.value = NowPlayingExtras(trackId = trackId, tempo = details.tempo)
 
-        val cover = details.coverUrl?.let { spotifyExtras.image(it) }
-        val artist = details.artistImageUrl?.let { spotifyExtras.image(it) }
+        val cover = details.coverUrl?.let { url -> runCatching { spotifyExtras.image(url) }.getOrNull() }
+        val artist = details.artistImageUrl?.let { url ->
+            runCatching { spotifyExtras.image(url) }.getOrNull()
+        }
 
         // Guard against a track change while the images were downloading.
         if (media.snapshot.value.track?.spotifyTrackId != trackId) return

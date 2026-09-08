@@ -96,6 +96,9 @@ class LyricsRepository(
     /** Whether each track could be romanized, asked once of the document as fetched. */
     private val romanizable = HashMap<String, Boolean>()
 
+    /** The language each track turned out to be in. Null is an answer: unknown. */
+    private val languages = HashMap<String, String?>()
+
     private var fetchJob: Job? = null
     private var currentRequest: LyricsRequest? = null
 
@@ -137,6 +140,7 @@ class LyricsRepository(
         currentRequest = request
         derived.clear()
         romanizable.clear()
+        languages.clear()
 
         if (request == null || !request.isUsable) {
             base.value = Base.Idle
@@ -193,6 +197,7 @@ class LyricsRepository(
         fetchJob?.cancel()
         derived.clear()
         romanizable.clear()
+        languages.clear()
         base.value = Base.Loading
         fetchJob = scope.launch {
             cache.remove(request.cacheIdentity())
@@ -207,6 +212,7 @@ class LyricsRepository(
         cache.remove(request.cacheIdentity())
         derived.clear()
         romanizable.clear()
+        languages.clear()
         base.value = Base.Ready(request.cacheIdentity(), document)
         return true
     }
@@ -225,6 +231,7 @@ class LyricsRepository(
         cache.clear()
         derived.clear()
         romanizable.clear()
+        languages.clear()
     }
 
     // ---- fetching -----------------------------------------------------------
@@ -265,7 +272,13 @@ class LyricsRepository(
         when (val answer = query(request)) {
             is Query.Broke -> base.value = Base.Failed(answer.message)
             is Query.Answered -> {
-                cache.put(key, answer.document)
+                // A miss is only worth remembering when it is a real answer. If a source
+                // timed out or returned a 503, we do not know that this track has no
+                // lyrics — and writing "none" into the cache would keep it blank for two
+                // days because an endpoint hiccuped once.
+                if (answer.document != null || !answer.provisional) {
+                    cache.put(key, answer.document)
+                }
                 base.value = answer.document
                     ?.let { Base.Ready(key, it) }
                     ?: Base.NotFound
@@ -273,9 +286,31 @@ class LyricsRepository(
         }
     }
 
+    /** One provider's contribution to a lookup. */
+    private data class Answer(
+        val id: String,
+        val document: LyricsDocument?,
+        /** True when it did not answer, as opposed to answering that it has nothing. */
+        val failed: Boolean,
+    )
+
+    /** Proof that a provider's own code ran to completion, whatever it returned. */
+    private class Finished(val document: LyricsDocument?)
+
     private sealed interface Query {
-        /** The providers were asked and this is what they had, null included. */
-        data class Answered(val document: LyricsDocument?) : Query
+        /**
+         * The providers were asked and this is what they had, null included.
+         *
+         * @param provisional true when a null result cannot be trusted as "this track has
+         *   no lyrics": a source did not answer at all — a timeout, a transport error, a
+         *   429 or a 5xx — or there was no source enabled to ask. Either way the answer
+         *   must not be cached, or enabling a provider (or an endpoint recovering) would
+         *   change nothing for two days.
+         */
+        data class Answered(
+            val document: LyricsDocument?,
+            val provisional: Boolean = false,
+        ) : Query
 
         /** The lookup itself failed, which is not the same as the track having no lyrics. */
         data class Broke(val message: String) : Query
@@ -291,21 +326,33 @@ class LyricsRepository(
         val settings = settingsStore.current
         val enabled = providersFor(settings, providers, localStore.id)
 
-        if (enabled.isEmpty()) return Query.Answered(null)
+        // Nothing was asked, so nothing was learned — least of all that this track has no
+        // lyrics.
+        if (enabled.isEmpty()) return Query.Answered(null, provisional = true)
 
         val results = try {
             coroutineScope {
                 enabled.map { provider ->
                     async {
-                        val document = withTimeoutOrNull(PROVIDER_TIMEOUT_MS) {
-                            runCatching { provider.fetch(request) }
-                                .onFailure { error ->
-                                    if (error is kotlinx.coroutines.CancellationException) throw error
-                                    Log.w(TAG, "${provider.id} failed: ${error.message}")
-                                }
-                                .getOrNull()
+                        var failed = false
+                        // Wrapped so that "the provider finished and had nothing" can be
+                        // told apart from "the provider ran out of time" — withTimeoutOrNull
+                        // returns null for both, and only one of them is a real answer.
+                        val finished = withTimeoutOrNull(PROVIDER_TIMEOUT_MS) {
+                            Finished(
+                                runCatching { provider.fetch(request) }
+                                    .onFailure { error ->
+                                        if (error is kotlinx.coroutines.CancellationException) {
+                                            throw error
+                                        }
+                                        failed = true
+                                        Log.w(TAG, "${provider.id} failed: ${error.message}")
+                                    }
+                                    .getOrNull(),
+                            )
                         }
-                        provider.id to document
+                        if (finished == null) Log.w(TAG, "${provider.id} timed out")
+                        Answer(provider.id, finished?.document, failed || finished == null)
                     }
                 }.awaitAll()
             }
@@ -316,7 +363,8 @@ class LyricsRepository(
         }
 
         return Query.Answered(
-            results.mapNotNull { (id, document) -> document?.let { id to it } }
+            provisional = results.any { it.failed },
+            document = results.mapNotNull { (id, document) -> document?.let { id to it } }
                 .maxWithOrNull(
                     compareBy(
                         { (_, document) -> qualityScore(document) },
@@ -368,7 +416,7 @@ class LyricsRepository(
         // decision about text the document already carries, so it costs nothing here —
         // no model, no download, no work on a track that has no translation anyway.
         if (settings.translationSource == TranslationSource.DEVICE) {
-            document = deriveTranslated(ready.key, document, settings)
+            document = deriveTranslated(ready.key, document, settings, sourceLanguage(ready))
         }
 
         return LyricsState.Loaded(
@@ -380,9 +428,27 @@ class LyricsRepository(
             romanizationAvailable = romanizationPossible(ready),
             translationAvailable = document.hasTranslation,
             translationPossible = document.hasTranslation ||
-                LyricsTranslator.canTranslate(ready.document, settings.translationTarget),
+                LyricsTranslator.canTranslate(
+                    sourceLanguage(ready),
+                    settings.translationTarget,
+                ),
             translating = isTranslating,
         )
+    }
+
+    /**
+     * What language this track is in, worked out once and remembered.
+     *
+     * Most providers declare nothing, and for Latin-script lyrics the script cannot say —
+     * so this may involve running the on-device identifier. Doing it here rather than inside
+     * the translator means the answer is shared between deciding whether to offer
+     * translation and actually doing it.
+     */
+    private suspend fun sourceLanguage(ready: Base.Ready): String? {
+        if (languages.containsKey(ready.key)) return languages[ready.key]
+        val tag = translator.identify(ready.document)
+        languages[ready.key] = tag
+        return tag
     }
 
     /**
@@ -425,6 +491,7 @@ class LyricsRepository(
         key: String,
         document: LyricsDocument,
         settings: Settings,
+        sourceTag: String?,
     ): LyricsDocument {
         val cacheKey = "$key|tr|${settings.translationTarget}|" +
             settings.romanizationStripsDiacritics + settings.showRomanization
@@ -439,6 +506,7 @@ class LyricsRepository(
                 // The user picked this language; a Chinese translation shipped with a
                 // Japanese song does not satisfy a request for English.
                 replaceProvided = true,
+                sourceTagOverride = sourceTag,
             )
         } finally {
             translating.value = false

@@ -41,7 +41,7 @@ class LrcLibProvider(private val credentials: ProviderCredentials) : LyricsProvi
                 ?: search(request)
         }
 
-    private fun exactGet(request: LyricsRequest, title: String): LyricsDocument? {
+    private suspend fun exactGet(request: LyricsRequest, title: String): LyricsDocument? {
         if (title.isBlank() || request.artist.isBlank()) return null
         val url = buildString {
             append(credentials.lrcLibBaseUrl).append("/api/get")
@@ -60,7 +60,7 @@ class LrcLibProvider(private val credentials: ProviderCredentials) : LyricsProvi
         return entry.toDocument(request)
     }
 
-    private fun search(request: LyricsRequest): LyricsDocument? {
+    private suspend fun search(request: LyricsRequest): LyricsDocument? {
         val url = buildString {
             append(credentials.lrcLibBaseUrl).append("/api/search")
             append("?track_name=").append(Http.encode(request.cleanTitle))

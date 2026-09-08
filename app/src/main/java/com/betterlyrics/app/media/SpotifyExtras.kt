@@ -99,7 +99,7 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
 
     private class TrackDetails(val artistId: String?, val coverUrl: String?)
 
-    private fun trackDetails(trackId: String, token: String): TrackDetails? =
+    private suspend fun trackDetails(trackId: String, token: String): TrackDetails? =
         Http.get("$WEB_API/tracks/$trackId", bearer(token)) { body ->
             runCatching {
                 val root = Json.parseToJsonElement(body).jsonObject
@@ -121,7 +121,7 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
      * square rather than letterboxed — which is indistinguishable once it has been blurred
      * into a background, and does not break when Spotify ships a new web player.
      */
-    private fun artistImage(artistId: String, token: String): String? =
+    private suspend fun artistImage(artistId: String, token: String): String? =
         Http.get("$WEB_API/artists/$artistId", bearer(token)) { body ->
             runCatching {
                 Json.parseToJsonElement(body).jsonObject["images"]?.jsonArray
@@ -130,7 +130,7 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
         }
 
     /** Returns tempo (BPM) and loudness (dB), or null when Spotify has no analysis. */
-    private fun audioAnalysis(trackId: String, token: String): Pair<Float, Float>? {
+    private suspend fun audioAnalysis(trackId: String, token: String): Pair<Float, Float>? {
         val url = "$SPCLIENT/audio-attributes/v1/audio-analysis/$trackId?format=json"
         return Http.get(url, bearer(token)) { body ->
             runCatching {

@@ -47,7 +47,7 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
             document
         }
 
-    private fun colorLyrics(
+    private suspend fun colorLyrics(
         trackId: String,
         token: String,
         request: LyricsRequest,

@@ -60,7 +60,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
             documentFrom(macro, request, token)
         }
 
-    private fun obtainToken(): String? {
+    private suspend fun obtainToken(): String? {
         val url = "https://apic-desktop.musixmatch.com/ws/1.1/token.get" +
             "?app_id=web-desktop-app-v1.0&t=${System.currentTimeMillis()}"
         return Http.get(url, HEADERS) { body ->
@@ -75,7 +75,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         }
     }
 
-    private fun macroCall(request: LyricsRequest, token: String): JsonObject? {
+    private suspend fun macroCall(request: LyricsRequest, token: String): JsonObject? {
         val url = buildString {
             append("https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get")
             append("?format=json&namespace=lyrics_richsynched&subtitle_format=mxm")
@@ -104,7 +104,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         }
     }
 
-    private fun documentFrom(
+    private suspend fun documentFrom(
         macro: JsonObject,
         request: LyricsRequest,
         token: String,
@@ -166,7 +166,7 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         }
     }
 
-    private fun fetchRichsync(trackId: String, token: String): String? {
+    private suspend fun fetchRichsync(trackId: String, token: String): String? {
         val url = "https://apic-desktop.musixmatch.com/ws/1.1/track.richsync.get" +
             "?format=json&app_id=web-desktop-app-v1.0&usertoken=${Http.encode(token)}" +
             "&track_id=${Http.encode(trackId)}"
@@ -286,9 +286,19 @@ class MusixmatchProvider(private val credentials: ProviderCredentials) : LyricsP
         return lines.sortedBy { it.startMs }.inferEndTimes(trackDurationMs).withInterludes()
     }
 
+    /**
+     * Remove the trailer Musixmatch appends to an unlicensed body.
+     *
+     * The old version cut at the first `...`, which took the rest of any song containing an
+     * ordinary ellipsis with it — a common thing in a lyric. Only the notice itself is
+     * removed now, and the `...` only when it is the truncation marker: on its own line, at
+     * the end.
+     */
     private fun stripMusixmatchNotice(body: String): String =
-        body.substringBefore("...").substringBefore("******* This Lyrics is NOT")
-            .trim()
+        body.substringBefore("******* This Lyrics is NOT")
+            .trimEnd()
+            .removeSuffix("...")
+            .trimEnd()
 
     private fun JsonObject.call(name: String): JsonObject? = runCatching {
         get(name)?.jsonObject?.get("message")?.jsonObject?.get("body")?.asObjectOrNull()

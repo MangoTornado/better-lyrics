@@ -55,7 +55,7 @@ class AppleMusicProvider(private val credentials: ProviderCredentials) : LyricsP
             null
         }
 
-    private fun search(request: LyricsRequest): String? {
+    private suspend fun search(request: LyricsRequest): String? {
         val storefront = credentials.appleStorefront.ifBlank { "us" }
         val queries = buildList {
             if (request.artist.isNotBlank()) add("${request.title} ${request.primaryArtist}")
@@ -99,7 +99,7 @@ class AppleMusicProvider(private val credentials: ProviderCredentials) : LyricsP
         return null
     }
 
-    private fun ttml(songId: String, relationship: String): String? {
+    private suspend fun ttml(songId: String, relationship: String): String? {
         val storefront = credentials.appleStorefront.ifBlank { "us" }
         val url = "$API_BASE/v1/catalog/$storefront/songs/$songId/$relationship"
         return Http.get(url, headers()) { body ->

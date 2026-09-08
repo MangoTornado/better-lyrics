@@ -47,7 +47,7 @@ class AmllTtmlProvider(private val credentials: ProviderCredentials) : LyricsPro
         }
 
     /** `/v1/lyrics/get` returns the metadata and the whole TTML in one response. */
-    private fun get(base: String, query: String): Entry? =
+    private suspend fun get(base: String, query: String): Entry? =
         Http.get("$base/v1/lyrics/get?$query", HEADERS) { body ->
             runCatching {
                 val root = Json.parseToJsonElement(body).jsonObject
@@ -61,7 +61,7 @@ class AmllTtmlProvider(private val credentials: ProviderCredentials) : LyricsPro
      * The search endpoint deliberately omits the lyrics themselves, so this is two round
      * trips — but only for tracks that are not playing from Spotify.
      */
-    private fun searchThenGet(base: String, request: LyricsRequest): Entry? {
+    private suspend fun searchThenGet(base: String, request: LyricsRequest): Entry? {
         val queries = buildList {
             if (request.primaryArtist.isNotBlank()) {
                 add(

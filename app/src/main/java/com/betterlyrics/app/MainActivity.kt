@@ -25,6 +25,8 @@ import com.betterlyrics.app.ui.theme.BetterLyricsTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -78,11 +80,25 @@ class MainActivity : ComponentActivity() {
 
         handleIntent(intent)
 
-        // Keep the window's own controls in step with play/pause.
+        // Keep the declared window parameters in step with everything they depend on:
+        // play/pause for the transport icons, and the popup settings themselves. The old
+        // version only re-declared them while already in the window, so turning popup off
+        // in the settings sheet — which never resumes the activity — left auto-enter armed
+        // and pressing Home still shrank the app.
         lifecycleScope.launch {
-            container.media.snapshot.collect { snapshot ->
-                if (_inPopup.value) applyPopupParams(snapshot.playback.isPlaying)
-            }
+            combine(
+                container.media.snapshot,
+                container.settings.settings,
+            ) { snapshot, settings ->
+                PopupInputs(
+                    isPlaying = snapshot.playback.isPlaying,
+                    hasTrack = snapshot.hasTrack,
+                    transport = snapshot.transport,
+                    enabled = settings.popupLyricsEnabled,
+                    autoEnter = settings.popupAutoEnter,
+                    shape = settings.popupShape,
+                )
+            }.distinctUntilChanged().collect { applyPopupParams(it.isPlaying) }
         }
     }
 
@@ -97,6 +113,19 @@ class MainActivity : ComponentActivity() {
         // listener service is only bound after that happens.
         container.media.refresh()
         container.media.start()
+    }
+
+    /**
+     * Let go of the media sessions when nothing of ours is on screen.
+     *
+     * The notification-listener service keeps the process alive on its own, so without
+     * this the session callbacks — and the lyrics lookups they drive — would keep running
+     * for every track the user plays long after they closed the app. A floating window is
+     * still on screen, so that keeps watching.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (!isInPictureInPictureMode) container.media.stop()
     }
 
     override fun onResume() {
@@ -130,30 +159,70 @@ class MainActivity : ComponentActivity() {
             .setActions(popupActions(isPlaying))
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setAutoEnterEnabled(settings.popupLyricsEnabled && settings.popupAutoEnter)
+            // Nothing playing means the window would contain the words "Nothing playing",
+            // which is not worth taking over the screen for — least of all during first-run
+            // setup, when leaving for the notification-access screen would trigger it. The
+            // pre-Android-12 path has always checked this; auto-enter must too.
+            builder.setAutoEnterEnabled(
+                settings.popupLyricsEnabled &&
+                    settings.popupAutoEnter &&
+                    container.media.snapshot.value.hasTrack,
+            )
             builder.setSeamlessResizeEnabled(true)
         }
 
         runCatching { setPictureInPictureParams(builder.build()) }
     }
 
+    /** Everything [applyPopupParams] reads, so the collector can skip repeated work. */
+    private data class PopupInputs(
+        val isPlaying: Boolean,
+        val hasTrack: Boolean,
+        val transport: com.betterlyrics.app.media.Transport,
+        val enabled: Boolean,
+        val autoEnter: Boolean,
+        val shape: com.betterlyrics.app.settings.PopupShape,
+    )
+
+    /**
+     * The buttons on the floating window.
+     *
+     * Only the ones the player will actually act on: a `RemoteAction` cannot be greyed out
+     * the way an in-app button can, so an unsupported one would be a button that does
+     * nothing with no way to tell.
+     */
     private fun popupActions(isPlaying: Boolean): List<RemoteAction> {
-        if (!container.media.snapshot.value.canControl) return emptyList()
-        return listOf(
-            remoteAction(
-                android.R.drawable.ic_media_previous,
-                "Previous",
-                ACTION_PREVIOUS,
-                0,
-            ),
-            remoteAction(
-                if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (isPlaying) "Pause" else "Play",
-                ACTION_PLAY_PAUSE,
-                1,
-            ),
-            remoteAction(android.R.drawable.ic_media_next, "Next", ACTION_NEXT, 2),
-        )
+        val transport = container.media.snapshot.value.transport
+        if (!transport.any) return emptyList()
+        return buildList {
+            if (transport.skipPrevious) {
+                add(
+                    remoteAction(
+                        android.R.drawable.ic_media_previous,
+                        "Previous",
+                        ACTION_PREVIOUS,
+                        0,
+                    ),
+                )
+            }
+            if (transport.playPause) {
+                add(
+                    remoteAction(
+                        if (isPlaying) {
+                            android.R.drawable.ic_media_pause
+                        } else {
+                            android.R.drawable.ic_media_play
+                        },
+                        if (isPlaying) "Pause" else "Play",
+                        ACTION_PLAY_PAUSE,
+                        1,
+                    ),
+                )
+            }
+            if (transport.skipNext) {
+                add(remoteAction(android.R.drawable.ic_media_next, "Next", ACTION_NEXT, 2))
+            }
+        }
     }
 
     private fun remoteAction(

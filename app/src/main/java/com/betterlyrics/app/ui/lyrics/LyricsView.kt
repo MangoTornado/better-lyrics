@@ -28,11 +28,21 @@ import com.betterlyrics.app.lyrics.model.LyricsDocument
 import com.betterlyrics.app.settings.FuriganaMode
 import com.betterlyrics.app.settings.Settings
 import com.betterlyrics.app.settings.TranslationSource
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
 /** How long to keep drawing after the playhead stops, so the springs can come to rest. */
 private const val SPRING_SETTLE_NANOS = 900_000_000L
+
+/**
+ * How often to look for something to do while the screen is still.
+ *
+ * 10 Hz: negligible next to a 60 Hz frame callback, and short enough that pressing play
+ * elsewhere does not visibly lag — the position jump that follows is treated as a seek and
+ * snapped, so the lyrics land rather than drifting into place late.
+ */
+private const val IDLE_POLL_MS = 100L
 
 /**
  * The lyrics surface.
@@ -140,6 +150,7 @@ fun LyricsView(
             var lastPosition = Long.MIN_VALUE
             var restingSince = 0L
             while (true) {
+                var awake = false
                 withFrameNanos { nanos ->
                     val position = positionMsProvider()
                     val moved = position != lastPosition
@@ -155,11 +166,18 @@ fun LyricsView(
                     // playing out. Once a paused song has settled, stop: there is nothing
                     // to redraw, and a lyrics screen left open should not hold the GPU at
                     // 60 fps to show a still image.
-                    val settling = moved ||
+                    awake = moved ||
                         nanos - restingSince < SPRING_SETTLE_NANOS ||
                         renderer.isSettling
-                    if (settling) frameNanos.longValue = nanos
+                    if (awake) frameNanos.longValue = nanos
                 }
+
+                // Deciding not to draw is not the same as not asking to. Looping straight
+                // back into withFrameNanos leaves a Choreographer callback scheduled on
+                // every single refresh, so a paused screen never actually idles — it just
+                // idles invisibly. Poll instead, slowly enough to cost nothing and often
+                // enough that resuming playback is not perceptibly late.
+                if (!awake) delay(IDLE_POLL_MS)
             }
         }
 

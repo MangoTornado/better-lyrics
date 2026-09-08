@@ -76,13 +76,30 @@ data class PlaybackPosition(
     }
 }
 
+/**
+ * Which transport operations the player actually supports.
+ *
+ * A session that publishes a playback state has not thereby promised to accept every
+ * command: a live stream cannot be sought or rewound, and a restricted session may only
+ * offer play and pause. It says which in `PlaybackState.actions`, and a control that is
+ * shown but silently ignored is worse than one that is visibly unavailable.
+ */
+data class Transport(
+    val playPause: Boolean = false,
+    val skipNext: Boolean = false,
+    val skipPrevious: Boolean = false,
+    val seek: Boolean = false,
+) {
+    val any: Boolean get() = playPause || skipNext || skipPrevious || seek
+}
+
 data class PlayerSnapshot(
     val track: TrackInfo? = null,
     val playback: PlaybackPosition = PlaybackPosition.IDLE,
     val artwork: Bitmap? = null,
     val sourcePackage: String? = null,
     val sourceLabel: String? = null,
-    val canControl: Boolean = false,
+    val transport: Transport = Transport(),
     /**
      * The track queued after this one, when the player publishes a queue at all.
      *
@@ -93,4 +110,7 @@ data class PlayerSnapshot(
     val nextTrack: TrackInfo? = null,
 ) {
     val hasTrack: Boolean get() = track != null && !track.isEmpty
+
+    /** True when the player accepts at least one command, so a control row is worth showing. */
+    val canControl: Boolean get() = transport.any
 }

@@ -3,8 +3,14 @@
   Settings and any lyrics files the user imported themselves are worth keeping across a
   restore. The lyrics cache lives in cacheDir, which Android never backs up, so it needs
   no rule of its own.
+
+  Cookies and tokens are not. They are live credentials for the user's own accounts, and
+  the app promises they stay on this device — so they live in their own preferences file
+  and that file is excluded. Backup rules work per file, which is the only reason the
+  split exists.
 -->
 <full-backup-content>
     <include domain="sharedpref" path="." />
+    <exclude domain="sharedpref" path="better-lyrics-credentials.xml" />
     <include domain="file" path="local-lyrics" />
 </full-backup-content>

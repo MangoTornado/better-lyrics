@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ equivalent of backup_rules.xml, for cloud backup and for a direct transfer
+  to a new phone. Both exclude the credentials file: a restored copy of somebody's
+  signed-in Spotify session is not something a lyrics app should be creating.
+-->
 <data-extraction-rules>
     <cloud-backup>
         <include domain="sharedpref" path="." />
+        <exclude domain="sharedpref" path="better-lyrics-credentials.xml" />
         <include domain="file" path="local-lyrics" />
     </cloud-backup>
     <device-transfer>
         <include domain="sharedpref" path="." />
+        <exclude domain="sharedpref" path="better-lyrics-credentials.xml" />
         <include domain="file" path="local-lyrics" />
     </device-transfer>
 </data-extraction-rules>

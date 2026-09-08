@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterlyrics.app.media.PlaybackPosition
+import com.betterlyrics.app.media.Transport
 import com.betterlyrics.app.media.TrackInfo
 import kotlinx.coroutines.delay
 
@@ -63,7 +64,7 @@ fun MediaPanel(
     playback: PlaybackPosition,
     artwork: Bitmap?,
     accent: Color,
-    canControl: Boolean,
+    transport: Transport,
     showVolume: Boolean,
     volume: Float,
     onVolumeChange: (Float) -> Unit,
@@ -178,6 +179,7 @@ fun MediaPanel(
             ScrubBar(
                 fraction = fraction,
                 accent = accent,
+                enabled = transport.seek,
                 onScrub = { scrubFraction = it },
                 onScrubFinished = {
                     if (scrubFraction >= 0f) {
@@ -191,12 +193,13 @@ fun MediaPanel(
                 rightLabel = formatTime(playback.durationMs),
             )
 
-            if (canControl && roomForTransport) {
+            // Per action rather than all-or-nothing: see NowBar for why.
+            if (transport.any && roomForTransport) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    IconButton(onClick = onPrevious) {
+                    IconButton(onClick = onPrevious, enabled = transport.skipPrevious) {
                         Icon(
                             AppIcons.SkipPrevious,
                             contentDescription = "Previous track",
@@ -205,7 +208,11 @@ fun MediaPanel(
                         )
                     }
                     Spacer(Modifier.width(6.dp))
-                    IconButton(onClick = onTogglePlay, modifier = Modifier.size(54.dp)) {
+                    IconButton(
+                        onClick = onTogglePlay,
+                        enabled = transport.playPause,
+                        modifier = Modifier.size(54.dp),
+                    ) {
                         Icon(
                             if (playback.isPlaying) AppIcons.Pause else AppIcons.PlayArrow,
                             contentDescription = if (playback.isPlaying) "Pause" else "Play",
@@ -214,7 +221,7 @@ fun MediaPanel(
                         )
                     }
                     Spacer(Modifier.width(6.dp))
-                    IconButton(onClick = onNext) {
+                    IconButton(onClick = onNext, enabled = transport.skipNext) {
                         Icon(
                             AppIcons.SkipNext,
                             contentDescription = "Next track",
@@ -250,6 +257,8 @@ fun MediaPanel(
 private fun ScrubBar(
     fraction: Float,
     accent: Color,
+    /** False for a player that publishes progress but does not accept seeks. */
+    enabled: Boolean,
     onScrub: (Float) -> Unit,
     onScrubFinished: () -> Unit,
     leftLabel: String,
@@ -257,6 +266,7 @@ private fun ScrubBar(
 ) {
     Slider(
         value = fraction,
+        enabled = enabled,
         onValueChange = onScrub,
         onValueChangeFinished = onScrubFinished,
         thumb = {

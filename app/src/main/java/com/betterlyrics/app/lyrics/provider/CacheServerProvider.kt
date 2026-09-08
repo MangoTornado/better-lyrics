@@ -50,7 +50,13 @@ class CacheServerProvider(private val credentials: ProviderCredentials) : Lyrics
                 request.spotifyTrackId?.let { append("&spotifyId=").append(Http.encode(it)) }
             }
 
-            Http.get("$base/v1/lyrics?$query", headers()) { body -> documentFrom(body) }
+            // runCatching around the whole parse, not just the JSON: this is a server the
+            // user is in the middle of writing, and a half-finished response should read as
+            // "nothing here" rather than taking the whole lookup down with it — Http.get no
+            // longer swallows what a parser throws.
+            Http.get("$base/v1/lyrics?$query", headers()) { body ->
+                runCatching { documentFrom(body) }.getOrNull()
+            }
         }
 
     /**
