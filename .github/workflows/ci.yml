@@ -26,6 +26,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # ubuntu-latest ships an Android SDK but not necessarily the platform this
+      # project compiles against, and AGP will not fetch it on its own.
+      - name: Install the Android platform and build tools
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest
 
