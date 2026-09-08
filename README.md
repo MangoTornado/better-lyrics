@@ -1,3 +1,5 @@
+<img src="docs/branding/icon-light.jpg" width="88" align="left" alt="" hspace="14" />
+
 # Better Lyrics
 
 A standalone Android app that shows word-by-word synced lyrics for whatever your phone

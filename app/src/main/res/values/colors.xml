@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Sampled from the icon artwork itself. The adaptive icon insets the artwork so its
+      mark survives the launcher's mask, and this fills the border it leaves behind — so
+      it has to match the artwork's own background exactly or the seam shows.
+    -->
+    <color name="ic_launcher_background">#28B5D9</color>
+</resources>

@@ -1,5 +1,6 @@
 package com.betterlyrics.app.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,9 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.betterlyrics.app.R
 
 /**
  * What to read before using the app.
@@ -62,13 +65,29 @@ fun WelcomeSheet(
                 .padding(horizontal = 22.dp)
                 .navigationBarsPadding(),
         ) {
-            Text(
-                "Welcome to Better Lyrics",
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 6.dp),
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The sheet is dark whatever the system theme is, so the artwork drawn for a
+                // dark surface is named explicitly rather than left to a night qualifier the
+                // app would ignore. Its black field blends into the sheet, leaving the mark.
+                Image(
+                    painter = painterResource(R.drawable.ic_brand_on_dark),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(13.dp)),
+                )
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    "Welcome to Better Lyrics",
+                    color = Color.White,
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             Text(
                 "Word-by-word lyrics for whatever your phone is playing — Spotify, YouTube " +
                     "Music, a local player, anything.",
