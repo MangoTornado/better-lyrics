@@ -220,6 +220,20 @@ data class Settings(
     val appleMusicUserToken: String? = null,
     val appleStorefront: String = "us",
 
+    // ---- updates ----------------------------------------------------------
+    /**
+     * Look for a new release on launch, at most every few hours.
+     *
+     * On by default: the app is installed from an APK, so nothing else will ever tell the
+     * user a fix exists. It is one small request to a public endpoint, and it downloads
+     * nothing until they say so.
+     */
+    val autoUpdateCheck: Boolean = true,
+    val lastUpdateCheckAt: Long = 0L,
+
+    /** A version the user chose to skip. A later one is still offered. */
+    val skippedUpdateVersion: String? = null,
+
     // ---- developer options ------------------------------------------------
     /** Reveals the section below in Settings. Off, and none of it is reachable. */
     val developerMode: Boolean = false,
@@ -370,6 +384,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         appleDeveloperToken = secrets.trimmed(KEY_APPLE_DEV_TOKEN),
         appleMusicUserToken = secrets.trimmed(KEY_APPLE_USER_TOKEN),
         appleStorefront = prefs.trimmed(KEY_APPLE_STOREFRONT) ?: "us",
+
+        autoUpdateCheck = prefs.getBoolean(KEY_AUTO_UPDATE, true),
+        lastUpdateCheckAt = prefs.getLong(KEY_UPDATE_CHECKED_AT, 0L),
+        skippedUpdateVersion = prefs.trimmed(KEY_UPDATE_SKIPPED),
 
         developerMode = prefs.getBoolean(KEY_DEVELOPER_MODE, false),
         cacheServerUrl = prefs.trimmed(KEY_CACHE_SERVER_URL),
@@ -572,6 +590,12 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_NETEASE_URL, value?.trim()?.trimEnd('/'))
     }
 
+    fun setAutoUpdateCheck(value: Boolean) = edit { putBoolean(KEY_AUTO_UPDATE, value) }
+
+    fun noteUpdateCheck(at: Long) = edit { putLong(KEY_UPDATE_CHECKED_AT, at) }
+
+    fun skipUpdateVersion(version: String?) = edit { putString(KEY_UPDATE_SKIPPED, version) }
+
     fun setDeveloperMode(value: Boolean) = edit { putBoolean(KEY_DEVELOPER_MODE, value) }
 
     fun updateCacheServerUrl(value: String?) = edit {
@@ -718,6 +742,9 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_LRCLIB_URL = "lrclib_url"
         const val KEY_NETEASE_URL = "netease_url"
         const val KEY_AMLL_URL = "amll_url"
+        const val KEY_AUTO_UPDATE = "auto_update_check"
+        const val KEY_UPDATE_CHECKED_AT = "update_checked_at"
+        const val KEY_UPDATE_SKIPPED = "update_skipped_version"
         const val KEY_DEVELOPER_MODE = "developer_mode"
         const val KEY_CACHE_SERVER_URL = "cache_server_url"
         const val KEY_CACHE_SERVER_KEY = "cache_server_key"

@@ -81,6 +81,7 @@ import com.betterlyrics.app.settings.TranslationSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import com.betterlyrics.app.update.Updater
 
 @Composable
 fun PlayerScreen(
@@ -120,6 +121,11 @@ fun PlayerScreen(
     var selectionMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(emptySet<Int>()) }
 
+    // Ask about updates once the screen is up. Respects the setting and its own interval,
+    // and says nothing at all when there is nothing to say.
+    val updateState by container.updater.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { container.updater.check(automatic = true) }
+
     // A floating window is the size of a postage stamp; whatever was covering the lyrics
     // has to get out of the way, or shrinking the app hands the user a miniature settings
     // sheet instead of the thing they wanted to keep watching.
@@ -129,6 +135,24 @@ fun PlayerScreen(
             showWelcome = false
             selectionMode = false
         }
+    }
+
+    if (!popup && !showWelcome) {
+        UpdatePrompt(
+            state = updateState,
+            currentVersion = container.updater.currentVersion,
+            onInstall = {
+                (updateState as? Updater.State.Available)?.let { available ->
+                    scope.launch { container.updater.downloadAndInstall(available.release) }
+                }
+            },
+            onSkip = {
+                (updateState as? Updater.State.Available)?.let {
+                    container.updater.skip(it.release)
+                }
+            },
+            onDismiss = { container.updater.dismiss() },
+        )
     }
     var jumpSignal by remember { mutableIntStateOf(0) }
 

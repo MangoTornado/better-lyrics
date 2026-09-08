@@ -19,6 +19,7 @@ import com.betterlyrics.app.media.MediaSessionRepository
 import com.betterlyrics.app.media.NowPlayingExtras
 import com.betterlyrics.app.media.SpotifyExtras
 import com.betterlyrics.app.settings.SettingsStore
+import com.betterlyrics.app.update.Updater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -69,6 +70,9 @@ class AppContainer(context: Context) {
         providers = providers,
         scope = scope,
     )
+
+    /** Finds and installs new releases, since nothing else will. */
+    val updater = Updater(context, settings)
 
     private val spotifyExtras = SpotifyExtras(settings)
 

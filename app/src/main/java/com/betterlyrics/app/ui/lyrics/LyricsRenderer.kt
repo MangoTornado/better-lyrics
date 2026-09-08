@@ -243,6 +243,11 @@ class LyricsRenderer(
         canvas.restore()
     }
 
+    /** Ease-out, so the fade leaves quickly and settles gently — as a light dimming does. */
+    private fun ease(t: Float): Float = 1f - (1f - t) * (1f - t)
+
+    private fun lerp(from: Float, to: Float, t: Float): Float = from + (to - from) * t
+
     private fun LineLayout.rightEdge(): Float =
         units.maxOfOrNull { it.x + it.width } ?: 0f
 
@@ -323,10 +328,22 @@ class LyricsRenderer(
         }
 
         val sung = positionMs > line.endMs
+
+        // How far a just-finished line is through dimming: 0 the moment the last syllable
+        // ends, 1 once it has fully receded. A function of the playhead alone, so scrubbing
+        // backwards puts the line back where it belongs instead of leaving a stale spring.
+        val faded = when {
+            !sung -> 1f
+            else -> ((positionMs - line.endMs) / LyricsAnim.SUNG_FADE_MS).coerceIn(0f, 1f)
+        }
+
+        val sungOpacity =
+            if (simpleMode) LyricsAnim.SIMPLE_OPACITY_SUNG else LyricsAnim.OPACITY_SUNG
         var opacity = when {
             isStatic -> 1f
             isActive -> LyricsAnim.OPACITY_ACTIVE
-            sung -> if (simpleMode) LyricsAnim.SIMPLE_OPACITY_SUNG else LyricsAnim.OPACITY_SUNG
+            // Eased down from lit rather than dropped there, which is the abrupt change.
+            sung -> lerp(LyricsAnim.OPACITY_ACTIVE, sungOpacity, ease(faded))
             else -> if (simpleMode) LyricsAnim.SIMPLE_OPACITY_NOT_SUNG else LyricsAnim.OPACITY_NOT_SUNG
         }
 
@@ -378,14 +395,21 @@ class LyricsRenderer(
             }
         } else {
             val fillAlpha = if (sung) {
-                if (simpleMode) LyricsAnim.SIMPLE_FILL_ALPHA_SUNG else LyricsAnim.FILL_ALPHA_SUNG
+                val settled =
+                    if (simpleMode) LyricsAnim.SIMPLE_FILL_ALPHA_SUNG else LyricsAnim.FILL_ALPHA_SUNG
+                // The line was fully filled when it finished; ease off that rather than
+                // cutting to the resting alpha.
+                lerp(1f, settled, ease(faded))
             } else {
                 if (simpleMode) LyricsAnim.SIMPLE_FILL_ALPHA_UNSUNG else LyricsAnim.FILL_ALPHA_UNSUNG
             }
             val blur = if (!defocusEnabled || distance == 0) {
                 0f
             } else {
-                (metrics.blurPerLinePx * distance).coerceAtMost(metrics.blurMaxPx)
+                // Coming into focus is animated by the same curve, so the line does not
+                // snap out of sharpness the instant it stops being sung.
+                (metrics.blurPerLinePx * distance).coerceAtMost(metrics.blurMaxPx) *
+                    if (sung) ease(faded) else 1f
             }
             drawFlat(canvas, line, paintForLine, fillAlpha * opacity * roleAlpha, blur)
             // Keep the springs parked so the line doesn't animate from a stale value the

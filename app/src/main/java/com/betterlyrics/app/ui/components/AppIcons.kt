@@ -17,6 +17,11 @@ object AppIcons {
 
     val PlayArrow by lazy { icon("PlayArrow", "M8,5v14l11,-7z") }
 
+    /** Also the settings section chevron, rotated 90 degrees when the section is open. */
+    val ChevronRight by lazy {
+        icon("ChevronRight", "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z")
+    }
+
     val Pause by lazy { icon("Pause", "M6,19h4V5H6v14zm8,-14v14h4V5h-4z") }
 
     val SkipNext by lazy { icon("SkipNext", "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z") }

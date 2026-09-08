@@ -6,6 +6,14 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
+      Installed from an APK rather than a store, so the app has to be able to offer its own
+      updates: this is what lets it hand a downloaded release to the system installer. It
+      grants nothing beyond that — Android still shows its own confirmation screen, and
+      still refuses an APK signed with a different key, which is what makes it safe.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
       Android 11+ hides other installed apps from us. We do not need to *launch* other
       apps to work — the media session is enough — but we do want to name the player in
       the UI and offer to open it, so declare an interest in the two things a music app
@@ -79,5 +87,21 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+        <!--
+          Hands the downloaded APK to the system installer. A content URI rather than a
+          file path, because passing a file:// URI across processes has been forbidden
+          since Android 7 — and this way the read permission is granted for that one file
+          and revoked when the installer is done with it.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
+
     </application>
 </manifest>

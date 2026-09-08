@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The one directory the installer is allowed to read from: where a downloaded release is
+  written. In cacheDir, so an abandoned download costs the user nothing permanently.
+-->
+<paths>
+    <cache-path
+        name="updates"
+        path="updates/" />
+</paths>

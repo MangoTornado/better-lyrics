@@ -72,6 +72,19 @@ object LyricsAnim {
     // ---- line opacity / defocus --------------------------------------------
 
     /** Opacity of a line by state, before the fill alpha is applied. */
+    /**
+     * How long a line takes to dim once it has been sung, in milliseconds.
+     *
+     * Without it the line drops from lit to dim in a single frame the instant its last
+     * syllable ends, which reads as a glitch — most obviously across a breathing gap, where
+     * nothing else is moving to distract from it. Spicy Lyrics eases the same transition.
+     *
+     * Driven from the playhead rather than a spring, so it is correct after a scrub and
+     * costs no state: a line that is 200 ms past its end is 200 ms into its fade, whatever
+     * happened in between.
+     */
+    const val SUNG_FADE_MS = 420f
+
     const val OPACITY_ACTIVE = 1f
     const val OPACITY_SUNG = 0.497f
     const val OPACITY_NOT_SUNG = 0.51f

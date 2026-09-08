@@ -61,6 +61,16 @@ import com.betterlyrics.app.settings.TranslationSource
 import com.betterlyrics.app.settings.CacheServerMode
 import com.betterlyrics.app.lyrics.LyricsRepository
 import kotlinx.coroutines.launch
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.Image
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.betterlyrics.app.R
+import com.betterlyrics.app.update.UpdateChecker
+import com.betterlyrics.app.update.Updater
 
 /**
  * Whether the long-form explanations are showing.
@@ -147,7 +157,18 @@ fun SettingsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val store = container.settings
+    val updater = container.updater
+    val context = LocalContext.current
     var showCredits by remember { mutableStateOf(false) }
+
+    // One section open at a time.
+    //
+    // There are a hundred-odd controls here, and a single flat list of them buries the
+    // three anybody actually came for. Collapsed headings turn it back into something you
+    // can read: a dozen names, and the one you want. Not remembered between openings —
+    // coming back to a sheet folded exactly as you left it is worse than coming back to a
+    // list, because the thing you were looking at last time is rarely the thing you want now.
+    var openSection by remember { mutableStateOf<String?>(null) }
     // Off by default: the one-line description under each row is enough most of the time,
     // and the longer explanations get in the way once you know what things do.
     var showHelp by remember { mutableStateOf(false) }
@@ -210,767 +231,948 @@ fun SettingsSheet(
                 modifier = Modifier.padding(top = 2.dp),
             )
 
-            // ---- view ------------------------------------------------------
-            SectionTitle("View")
-
-            ChipGroup(
-                label = "Layout",
-                options = ViewMode.entries.map { it to it.label },
-                selected = settings.viewMode,
+            Section(
+                title = "View",
+                subtitle = "Cinema, where the controls sit",
+                open = openSection == "view",
                 accent = accent,
-                onSelect = { store.setViewMode(it) },
-            )
-            Hint(
-                "Cinema puts the album art beside the words — above them on a phone held " +
-                    "upright, to the side when it is turned.",
-            )
+                onToggle = { openSection = if (openSection == "view") null else "view" },
+            ) {
 
-            if (settings.viewMode == ViewMode.CINEMA) {
                 ChipGroup(
-                    label = "Artwork on the",
-                    options = MediaPanelSide.entries.map { it to it.label },
-                    selected = settings.mediaPanelSide,
+                    label = "Layout",
+                    options = ViewMode.entries.map { it to it.label },
+                    selected = settings.viewMode,
                     accent = accent,
-                    onSelect = { store.setMediaPanelSide(it) },
+                    onSelect = { store.setViewMode(it) },
                 )
-            }
-
-            ChipGroup(
-                label = "Controls",
-                options = ControlsPosition.entries.map {
-                    it to if (it == ControlsPosition.TOP) "Top" else "Bottom"
-                },
-                selected = settings.controlsPosition,
-                accent = accent,
-                onSelect = { store.setControlsPosition(it) },
-            )
-
-            ToggleRow(
-                title = "Volume slider",
-                subtitle = "A volume band under the artwork and the now-playing bar",
-                checked = settings.showVolumeSlider,
-                accent = accent,
-                onCheckedChange = { store.setShowVolumeSlider(it) },
-            )
-            Help(
-                "Drives the phone's own music volume, not the player's mixer, so it moves with the hardware keys.",
-            )
-
-            ToggleRow(
-                title = "Use extras from Spotify",
-                subtitle = if (container.spotifyExtrasAvailable) {
-                    "Artist image, full-size cover art, and pacing the background to the tempo"
-                } else {
-                    "Needs the Spotify cookie below"
-                },
-                checked = settings.useSpotifyExtras,
-                accent = accent,
-                onCheckedChange = { store.setUseSpotifyExtras(it) },
-            )
-            Help(
-                "One small request per track against Spotify's own API, using the cookie below. It gets the artist's photo, the cover at full size instead of the thumbnail a media session publishes, and the tempo — which paces how fast the background drifts.",
-            )
-
-            ToggleRow(
-                title = "Compact mode",
-                subtitle = "Smaller type and tighter spacing, for split screen",
-                checked = settings.compactMode,
-                accent = accent,
-                onCheckedChange = { store.setCompactMode(it) },
-            )
-            Help(
-                "Meant for split screen or a small window. The floating window switches to it on its own, so you do not need this for that.",
-            )
-
-            ToggleRow(
-                title = "Keep the screen on",
-                subtitle = "Applies next time the lyrics screen comes to the front",
-                checked = settings.keepScreenOn,
-                accent = accent,
-                onCheckedChange = { store.setKeepScreenOn(it) },
-            )
-
-            // ---- popup lyrics ---------------------------------------------
-            Divider()
-            SectionTitle("Popup lyrics")
-
-            ToggleRow(
-                title = "Popup lyrics",
-                subtitle = "Carry on in a floating window over other apps",
-                checked = settings.popupLyricsEnabled,
-                accent = accent,
-                onCheckedChange = { store.setPopupLyricsEnabled(it) },
-            )
-
-            if (settings.popupLyricsEnabled) {
-                ToggleRow(
-                    title = "Shrink automatically",
-                    subtitle = "Enter the window when you leave the app, the way YouTube does",
-                    checked = settings.popupAutoEnter,
-                    accent = accent,
-                    onCheckedChange = { store.setPopupAutoEnter(it) },
+                Hint(
+                    "Cinema puts the album art beside the words — above them on a phone held " +
+                        "upright, to the side when it is turned.",
                 )
-            Help(
-                "On Android 12 and up the system does the shrinking itself, which is why it animates smoothly. Below that the app asks as you leave, which is a little more abrupt.",
-            )
+
+                if (settings.viewMode == ViewMode.CINEMA) {
+                    ChipGroup(
+                        label = "Artwork on the",
+                        options = MediaPanelSide.entries.map { it to it.label },
+                        selected = settings.mediaPanelSide,
+                        accent = accent,
+                        onSelect = { store.setMediaPanelSide(it) },
+                    )
+                }
+
                 ChipGroup(
-                    label = "Shape",
-                    options = PopupShape.entries.map { it to it.label },
-                    selected = settings.popupShape,
+                    label = "Controls",
+                    options = ControlsPosition.entries.map {
+                        it to if (it == ControlsPosition.TOP) "Top" else "Bottom"
+                    },
+                    selected = settings.controlsPosition,
                     accent = accent,
-                    onSelect = { store.setPopupShape(it) },
+                    onSelect = { store.setControlsPosition(it) },
                 )
+
                 ToggleRow(
-                    title = "Show the cover in the window",
-                    subtitle = "Only in Cinema view · off leaves the whole window to the words",
-                    checked = settings.popupShowArtwork,
+                    title = "Volume slider",
+                    subtitle = "A volume band under the artwork and the now-playing bar",
+                    checked = settings.showVolumeSlider,
                     accent = accent,
-                    onCheckedChange = { store.setPopupShowArtwork(it) },
+                    onCheckedChange = { store.setShowVolumeSlider(it) },
                 )
                 Help(
-                    "The floating window follows the main one: it is the same screen made " +
-                        "small, so it shows the cover when Cinema view does and only then. " +
-                        "Shrinking the app should not add a panel that was not on screen a " +
-                        "moment ago.",
+                    "Drives the phone's own music volume, not the player's mixer, so it moves with the hardware keys.",
+                )
+
+                ToggleRow(
+                    title = "Use extras from Spotify",
+                    subtitle = if (container.spotifyExtrasAvailable) {
+                        "Artist image, full-size cover art, and pacing the background to the tempo"
+                    } else {
+                        "Needs the Spotify cookie below"
+                    },
+                    checked = settings.useSpotifyExtras,
+                    accent = accent,
+                    onCheckedChange = { store.setUseSpotifyExtras(it) },
+                )
+                Help(
+                    "One small request per track against Spotify's own API, using the cookie below. It gets the artist's photo, the cover at full size instead of the thumbnail a media session publishes, and the tempo — which paces how fast the background drifts.",
+                )
+
+                ToggleRow(
+                    title = "Compact mode",
+                    subtitle = "Smaller type and tighter spacing, for split screen",
+                    checked = settings.compactMode,
+                    accent = accent,
+                    onCheckedChange = { store.setCompactMode(it) },
+                )
+                Help(
+                    "Meant for split screen or a small window. The floating window switches to it on its own, so you do not need this for that.",
+                )
+
+                ToggleRow(
+                    title = "Keep the screen on",
+                    subtitle = "Applies next time the lyrics screen comes to the front",
+                    checked = settings.keepScreenOn,
+                    accent = accent,
+                    onCheckedChange = { store.setKeepScreenOn(it) },
                 )
             }
 
-            // ---- lyrics display -------------------------------------------
-            Divider()
-            SectionTitle("Lyrics display")
-
-            SliderRow(
-                label = "Text size",
-                value = settings.fontScale,
-                range = 0.7f..1.6f,
-                display = "${(settings.fontScale * 100).toInt()}%",
+            Section(
+                title = "Popup lyrics",
+                subtitle = "The floating window",
+                open = openSection == "popup",
                 accent = accent,
-                onChange = { store.setFontScale(it) },
-            )
+                onToggle = { openSection = if (openSection == "popup") null else "popup" },
+            ) {
 
-            ChipGroup(
-                label = "Font",
-                options = LyricsFont.entries.map { it to it.label },
-                selected = settings.font,
+                ToggleRow(
+                    title = "Popup lyrics",
+                    subtitle = "Carry on in a floating window over other apps",
+                    checked = settings.popupLyricsEnabled,
+                    accent = accent,
+                    onCheckedChange = { store.setPopupLyricsEnabled(it) },
+                )
+
+                if (settings.popupLyricsEnabled) {
+                    ToggleRow(
+                        title = "Shrink automatically",
+                        subtitle = "Enter the window when you leave the app, the way YouTube does",
+                        checked = settings.popupAutoEnter,
+                        accent = accent,
+                        onCheckedChange = { store.setPopupAutoEnter(it) },
+                    )
+                Help(
+                    "On Android 12 and up the system does the shrinking itself, which is why it animates smoothly. Below that the app asks as you leave, which is a little more abrupt.",
+                )
+                    ChipGroup(
+                        label = "Shape",
+                        options = PopupShape.entries.map { it to it.label },
+                        selected = settings.popupShape,
+                        accent = accent,
+                        onSelect = { store.setPopupShape(it) },
+                    )
+                    ToggleRow(
+                        title = "Show the cover in the window",
+                        subtitle = "Only in Cinema view · off leaves the whole window to the words",
+                        checked = settings.popupShowArtwork,
+                        accent = accent,
+                        onCheckedChange = { store.setPopupShowArtwork(it) },
+                    )
+                    Help(
+                        "The floating window follows the main one: it is the same screen made " +
+                            "small, so it shows the cover when Cinema view does and only then. " +
+                            "Shrinking the app should not add a panel that was not on screen a " +
+                            "moment ago.",
+                    )
+                }
+            }
+
+            Section(
+                title = "Lyrics display",
+                subtitle = "Size, font, effects",
+                open = openSection == "display",
                 accent = accent,
-                onSelect = { store.setFont(it) },
-            )
+                onToggle = { openSection = if (openSection == "display") null else "display" },
+            ) {
 
-            ToggleRow(
-                title = "Depth blur",
-                subtitle = "Lines further from the current one fall out of focus",
-                checked = settings.lineBlur,
+                SliderRow(
+                    label = "Text size",
+                    value = settings.fontScale,
+                    range = 0.7f..1.6f,
+                    display = "${(settings.fontScale * 100).toInt()}%",
+                    accent = accent,
+                    onChange = { store.setFontScale(it) },
+                )
+
+                ChipGroup(
+                    label = "Font",
+                    options = LyricsFont.entries.map { it to it.label },
+                    selected = settings.font,
+                    accent = accent,
+                    onSelect = { store.setFont(it) },
+                )
+
+                ToggleRow(
+                    title = "Depth blur",
+                    subtitle = "Lines further from the current one fall out of focus",
+                    checked = settings.lineBlur,
+                    accent = accent,
+                    onCheckedChange = { store.setLineBlur(it) },
+                )
+                Help(
+                    "Lines away from the current one are drawn as a blur of themselves, which is what gives the page depth. It is done by drawing the glyphs transparent with a shadow behind them; if that renders oddly on your device, turn it off.",
+                )
+
+                ToggleRow(
+                    title = "Simple mode",
+                    subtitle = "Flatter contrast and no letter-by-letter emphasis",
+                    checked = settings.simpleMode,
+                    accent = accent,
+                    onCheckedChange = { store.setSimpleMode(it) },
+                )
+                Help(
+                    "Drops the letter-by-letter emphasis on long syllables and flattens the contrast between sung and unsung lines. Calmer, and cheaper to draw.",
+                )
+
+                ToggleRow(
+                    title = "Minimal mode",
+                    subtitle = "Sung lines shrink and leave the page instead of dimming",
+                    checked = settings.minimalMode,
+                    accent = accent,
+                    onCheckedChange = { store.setMinimalMode(it) },
+                )
+                Help(
+                    "Only the line being sung and the ones still to come stay on screen. Good for following along, less good for reading ahead or behind.",
+                )
+
+                ChipGroup(
+                    label = "Text animation",
+                    options = TextAnimationStyle.entries.map { it to it.label },
+                    selected = settings.textAnimationStyle,
+                    accent = accent,
+                    onSelect = { store.setTextAnimationStyle(it) },
+                )
+                Hint(settings.textAnimationStyle.description)
+                Help(
+                    "Calculate reads the playhead every frame, so it is always exactly right " +
+                        "but only as smooth as the player's reporting. Animate starts a steady " +
+                        "sweep when each syllable begins, which looks smoother but can drift a " +
+                        "little across a seek — it snaps back if it drifts far.",
+                )
+
+                ToggleRow(
+                    title = "Highlight the line you hold",
+                    subtitle = "A tinted box appears under your finger; holding also copies the line",
+                    checked = settings.lineTapHighlight,
+                    accent = accent,
+                    onCheckedChange = { store.setLineTapHighlight(it) },
+                )
+                Help(
+                    "A desktop shows this when the mouse is over a line; a finger has no hover, so it appears while you hold — which is also the gesture that copies the line.",
+                )
+
+                ToggleRow(
+                    title = "Duet indent",
+                    subtitle = "Inset duet lines so the two voices read as separate columns",
+                    checked = settings.duetLinePadding,
+                    accent = accent,
+                    onCheckedChange = { store.setDuetLinePadding(it) },
+                )
+                Help(
+                    "Only affects songs whose lyrics mark two voices. Off gives every line the same small inset.",
+                )
+
+                ToggleRow(
+                    title = "Show credits",
+                    subtitle = "Songwriters and the lyrics source, after the last line",
+                    checked = settings.showCredits,
+                    accent = accent,
+                    onCheckedChange = { store.setShowCredits(it) },
+                )
+                Help(
+                    "Printed after the last line, inside the scroll rather than in the app's chrome, so it reads as the end of the song.",
+                )
+            }
+
+            Section(
+                title = "Background",
+                subtitle = "What sits behind the words",
+                open = openSection == "background",
                 accent = accent,
-                onCheckedChange = { store.setLineBlur(it) },
-            )
-            Help(
-                "Lines away from the current one are drawn as a blur of themselves, which is what gives the page depth. It is done by drawing the glyphs transparent with a shadow behind them; if that renders oddly on your device, turn it off.",
-            )
+                onToggle = { openSection = if (openSection == "background") null else "background" },
+            ) {
 
-            ToggleRow(
-                title = "Simple mode",
-                subtitle = "Flatter contrast and no letter-by-letter emphasis",
-                checked = settings.simpleMode,
+                ChipGroup(
+                    label = "Style",
+                    options = BackgroundStyle.entries.map { it to it.label },
+                    selected = settings.backgroundStyle,
+                    accent = accent,
+                    onSelect = { store.setBackgroundStyle(it) },
+                )
+                if (settings.backgroundStyle == BackgroundStyle.ARTIST_HEADER &&
+                    !container.spotifyExtrasAvailable
+                ) {
+                    Hint(
+                        "The artist background needs the Spotify cookie below — without it this " +
+                            "falls back to the cover art.",
+                    )
+                }
+
+                if (settings.backgroundStyle == BackgroundStyle.COVER_ART ||
+                    settings.backgroundStyle == BackgroundStyle.AUTO
+                ) {
+                    SliderRow(
+                        label = "Cover blur",
+                        value = settings.backgroundBlur.toFloat(),
+                        range = 0f..67f,
+                        display = "${settings.backgroundBlur}px",
+                        accent = accent,
+                        onChange = { store.setBackgroundBlur(it.toInt()) },
+                    )
+                Help(
+                    "The blur comes from how far the image is shrunk before being scaled back up, so 0 leaves the artwork nearly sharp and 67 leaves a wash of its colours.",
+                )
+                }
+            }
+
+            Section(
+                title = "Timing",
+                subtitle = "Offset, scrolling, taps",
+                open = openSection == "timing",
                 accent = accent,
-                onCheckedChange = { store.setSimpleMode(it) },
-            )
-            Help(
-                "Drops the letter-by-letter emphasis on long syllables and flattens the contrast between sung and unsung lines. Calmer, and cheaper to draw.",
-            )
+                onToggle = { openSection = if (openSection == "timing") null else "timing" },
+            ) {
 
-            ToggleRow(
-                title = "Minimal mode",
-                subtitle = "Sung lines shrink and leave the page instead of dimming",
-                checked = settings.minimalMode,
+                SliderRow(
+                    label = "Sync offset",
+                    value = settings.syncOffsetMs.toFloat(),
+                    range = -3000f..3000f,
+                    display = "${settings.syncOffsetMs}ms",
+                    accent = accent,
+                    onChange = { store.setSyncOffset((it / 10).toInt() * 10) },
+                )
+                Hint(
+                    when {
+                        settings.syncOffsetMs == 0 -> "In step with the player."
+                        settings.syncOffsetMs > 0 -> "Lyrics run ${settings.syncOffsetMs}ms early."
+                        else -> "Lyrics run ${-settings.syncOffsetMs}ms late."
+                    } + " Bluetooth usually needs a positive value.",
+                )
+                Row(Modifier.padding(bottom = 8.dp)) {
+                    StepButton("−50", accent) { store.setSyncOffset(settings.syncOffsetMs - 50) }
+                    Spacer(Modifier.width(8.dp))
+                    StepButton("Reset", accent) { store.setSyncOffset(0) }
+                    Spacer(Modifier.width(8.dp))
+                    StepButton("+50", accent) { store.setSyncOffset(settings.syncOffsetMs + 50) }
+                }
+
+                ToggleRow(
+                    title = "Tap a line to jump there",
+                    subtitle = "Seeks the player to that line",
+                    checked = settings.tapLineToSeek,
+                    accent = accent,
+                    onCheckedChange = { store.setTapLineToSeek(it) },
+                )
+                Help(
+                    "Only works on lyrics that have timings. Holding a line still copies it either way.",
+                )
+
+                SliderRow(
+                    label = "Take scrolling back after",
+                    value = settings.autoScrollResumeMs / 1000f,
+                    range = 0.5f..6f,
+                    display = "%.1fs".format(settings.autoScrollResumeMs / 1000f),
+                    accent = accent,
+                    onChange = { store.setAutoScrollResumeMs((it * 1000).toInt()) },
+                )
+                Help(
+                    "After you drag the lyrics by hand, this is how long they wait before scrolling themselves again.",
+                )
+            }
+
+            Section(
+                title = "Language",
+                subtitle = "Romanization, furigana, translation",
+                open = openSection == "language",
                 accent = accent,
-                onCheckedChange = { store.setMinimalMode(it) },
-            )
-            Help(
-                "Only the line being sung and the ones still to come stay on screen. Good for following along, less good for reading ahead or behind.",
-            )
+                onToggle = { openSection = if (openSection == "language") null else "language" },
+            ) {
 
-            ChipGroup(
-                label = "Text animation",
-                options = TextAnimationStyle.entries.map { it to it.label },
-                selected = settings.textAnimationStyle,
+                ToggleRow(
+                    title = "Romanization",
+                    subtitle = "Japanese, Korean, Chinese, Cyrillic and Greek in Latin letters",
+                    checked = settings.showRomanization,
+                    accent = accent,
+                    onCheckedChange = { store.setShowRomanization(it) },
+                )
+                Help(
+                    "Replaces the words with their Latin transcription, per syllable, so the karaoke fill still follows what you are singing. Japanese goes through a dictionary rather than a character table, because kanji have no fixed reading.",
+                )
+
+                if (settings.showRomanization) {
+                    ToggleRow(
+                        title = "Drop tone marks",
+                        subtitle = "`ni hao` instead of `nǐ hǎo`",
+                        checked = settings.romanizationStripsDiacritics,
+                        accent = accent,
+                        onCheckedChange = { store.setStripDiacritics(it) },
+                    )
+                }
+
+                ChipGroup(
+                    label = "Furigana",
+                    options = FuriganaMode.entries.map { it to it.label },
+                    selected = settings.furigana,
+                    accent = accent,
+                    onSelect = { store.setFurigana(it) },
+                )
+                Hint(
+                    if (settings.showRomanization) {
+                        "Turn romanization off to see it: furigana is a gloss over the original " +
+                            "Japanese, so the two are not shown together."
+                    } else {
+                        "Prints the kana reading in small type over the kanji, the way a " +
+                            "songbook does. Japanese only, and the readings come from the same " +
+                            "dictionary the romanization uses."
+                    },
+                )
+
+                ChipGroup(
+                    label = "Translation",
+                    options = TranslationSource.entries.map { it to it.label },
+                    selected = settings.translationSource,
+                    accent = accent,
+                    onSelect = { store.setTranslationSource(it) },
+                )
+                Hint(
+                    when (settings.translationSource) {
+                        TranslationSource.OFF -> "No translation under the lyrics."
+                        TranslationSource.PROVIDER ->
+                            "Whatever came with the lyrics. Free, instant, and written by a " +
+                                "person — but in the language they chose."
+                        TranslationSource.DEVICE ->
+                            "Machine translation into the language you pick below. Downloads a " +
+                                "model the first time."
+                    },
+                )
+                Help(
+                    "These are two different things, which is why they are two different " +
+                        "choices. NetEase and the AMLL database ship human translations with the " +
+                        "lyrics: nothing to download, nothing sent anywhere, available the " +
+                        "instant the words are — but a Japanese song is usually translated into " +
+                        "Chinese, because that is who transcribed it. On-device translation is " +
+                        "ML Kit running on your phone, into the language you asked for, and it " +
+                        "replaces whatever the source supplied rather than leaving you reading " +
+                        "a language you did not choose. It still sends nothing anywhere; the " +
+                        "cost is a one-off model download per language pair.",
+                )
+
+                if (settings.translationSource == TranslationSource.DEVICE) {
+                    ChipGroup(
+                        label = "Translate into",
+                        options = TRANSLATION_TARGETS,
+                        selected = settings.translationTarget,
+                        accent = accent,
+                        perRow = 4,
+                        onSelect = { store.setTranslationTarget(it) },
+                    )
+                    ToggleRow(
+                        title = "Download models on Wi-Fi only",
+                        subtitle = "Each language is roughly 30 MB",
+                        checked = settings.translationWifiOnly,
+                        accent = accent,
+                        onCheckedChange = { store.setTranslationWifiOnly(it) },
+                    )
+                    Help(
+                        "Only affects the one-off model download, not the translating itself, " +
+                            "which is offline.",
+                    )
+                }
+            }
+
+            Section(
+                title = "Where lyrics come from",
+                subtitle = "Which sources, and in what order",
+                open = openSection == "sources",
                 accent = accent,
-                onSelect = { store.setTextAnimationStyle(it) },
-            )
-            Hint(settings.textAnimationStyle.description)
-            Help(
-                "Calculate reads the playhead every frame, so it is always exactly right " +
-                    "but only as smooth as the player's reporting. Animate starts a steady " +
-                    "sweep when each syllable begins, which looks smoother but can drift a " +
-                    "little across a seek — it snaps back if it drifts far.",
-            )
-
-            ToggleRow(
-                title = "Highlight the line you hold",
-                subtitle = "A tinted box appears under your finger; holding also copies the line",
-                checked = settings.lineTapHighlight,
-                accent = accent,
-                onCheckedChange = { store.setLineTapHighlight(it) },
-            )
-            Help(
-                "A desktop shows this when the mouse is over a line; a finger has no hover, so it appears while you hold — which is also the gesture that copies the line.",
-            )
-
-            ToggleRow(
-                title = "Duet indent",
-                subtitle = "Inset duet lines so the two voices read as separate columns",
-                checked = settings.duetLinePadding,
-                accent = accent,
-                onCheckedChange = { store.setDuetLinePadding(it) },
-            )
-            Help(
-                "Only affects songs whose lyrics mark two voices. Off gives every line the same small inset.",
-            )
-
-            ToggleRow(
-                title = "Show credits",
-                subtitle = "Songwriters and the lyrics source, after the last line",
-                checked = settings.showCredits,
-                accent = accent,
-                onCheckedChange = { store.setShowCredits(it) },
-            )
-            Help(
-                "Printed after the last line, inside the scroll rather than in the app's chrome, so it reads as the end of the song.",
-            )
-
-            // ---- background -----------------------------------------------
-            Divider()
-            SectionTitle("Background")
-
-            ChipGroup(
-                label = "Style",
-                options = BackgroundStyle.entries.map { it to it.label },
-                selected = settings.backgroundStyle,
-                accent = accent,
-                onSelect = { store.setBackgroundStyle(it) },
-            )
-            if (settings.backgroundStyle == BackgroundStyle.ARTIST_HEADER &&
-                !container.spotifyExtrasAvailable
+                onToggle = { openSection = if (openSection == "sources") null else "sources" },
             ) {
                 Hint(
-                    "The artist background needs the Spotify cookie below — without it this " +
-                        "falls back to the cover art.",
-                )
-            }
-
-            if (settings.backgroundStyle == BackgroundStyle.COVER_ART ||
-                settings.backgroundStyle == BackgroundStyle.AUTO
-            ) {
-                SliderRow(
-                    label = "Cover blur",
-                    value = settings.backgroundBlur.toFloat(),
-                    range = 0f..67f,
-                    display = "${settings.backgroundBlur}px",
-                    accent = accent,
-                    onChange = { store.setBackgroundBlur(it.toInt()) },
-                )
-            Help(
-                "The blur comes from how far the image is shrunk before being scaled back up, so 0 leaves the artwork nearly sharp and 67 leaves a wash of its colours.",
-            )
-            }
-
-            // ---- timing ----------------------------------------------------
-            Divider()
-            SectionTitle("Timing")
-
-            SliderRow(
-                label = "Sync offset",
-                value = settings.syncOffsetMs.toFloat(),
-                range = -3000f..3000f,
-                display = "${settings.syncOffsetMs}ms",
-                accent = accent,
-                onChange = { store.setSyncOffset((it / 10).toInt() * 10) },
-            )
-            Hint(
-                when {
-                    settings.syncOffsetMs == 0 -> "In step with the player."
-                    settings.syncOffsetMs > 0 -> "Lyrics run ${settings.syncOffsetMs}ms early."
-                    else -> "Lyrics run ${-settings.syncOffsetMs}ms late."
-                } + " Bluetooth usually needs a positive value.",
-            )
-            Row(Modifier.padding(bottom = 8.dp)) {
-                StepButton("−50", accent) { store.setSyncOffset(settings.syncOffsetMs - 50) }
-                Spacer(Modifier.width(8.dp))
-                StepButton("Reset", accent) { store.setSyncOffset(0) }
-                Spacer(Modifier.width(8.dp))
-                StepButton("+50", accent) { store.setSyncOffset(settings.syncOffsetMs + 50) }
-            }
-
-            ToggleRow(
-                title = "Tap a line to jump there",
-                subtitle = "Seeks the player to that line",
-                checked = settings.tapLineToSeek,
-                accent = accent,
-                onCheckedChange = { store.setTapLineToSeek(it) },
-            )
-            Help(
-                "Only works on lyrics that have timings. Holding a line still copies it either way.",
-            )
-
-            SliderRow(
-                label = "Take scrolling back after",
-                value = settings.autoScrollResumeMs / 1000f,
-                range = 0.5f..6f,
-                display = "%.1fs".format(settings.autoScrollResumeMs / 1000f),
-                accent = accent,
-                onChange = { store.setAutoScrollResumeMs((it * 1000).toInt()) },
-            )
-            Help(
-                "After you drag the lyrics by hand, this is how long they wait before scrolling themselves again.",
-            )
-
-            // ---- language --------------------------------------------------
-            Divider()
-            SectionTitle("Language")
-
-            ToggleRow(
-                title = "Romanization",
-                subtitle = "Japanese, Korean, Chinese, Cyrillic and Greek in Latin letters",
-                checked = settings.showRomanization,
-                accent = accent,
-                onCheckedChange = { store.setShowRomanization(it) },
-            )
-            Help(
-                "Replaces the words with their Latin transcription, per syllable, so the karaoke fill still follows what you are singing. Japanese goes through a dictionary rather than a character table, because kanji have no fixed reading.",
-            )
-
-            if (settings.showRomanization) {
-                ToggleRow(
-                    title = "Drop tone marks",
-                    subtitle = "`ni hao` instead of `nǐ hǎo`",
-                    checked = settings.romanizationStripsDiacritics,
-                    accent = accent,
-                    onCheckedChange = { store.setStripDiacritics(it) },
-                )
-            }
-
-            ChipGroup(
-                label = "Furigana",
-                options = FuriganaMode.entries.map { it to it.label },
-                selected = settings.furigana,
-                accent = accent,
-                onSelect = { store.setFurigana(it) },
-            )
-            Hint(
-                if (settings.showRomanization) {
-                    "Turn romanization off to see it: furigana is a gloss over the original " +
-                        "Japanese, so the two are not shown together."
-                } else {
-                    "Prints the kana reading in small type over the kanji, the way a " +
-                        "songbook does. Japanese only, and the readings come from the same " +
-                        "dictionary the romanization uses."
-                },
-            )
-
-            ChipGroup(
-                label = "Translation",
-                options = TranslationSource.entries.map { it to it.label },
-                selected = settings.translationSource,
-                accent = accent,
-                onSelect = { store.setTranslationSource(it) },
-            )
-            Hint(
-                when (settings.translationSource) {
-                    TranslationSource.OFF -> "No translation under the lyrics."
-                    TranslationSource.PROVIDER ->
-                        "Whatever came with the lyrics. Free, instant, and written by a " +
-                            "person — but in the language they chose."
-                    TranslationSource.DEVICE ->
-                        "Machine translation into the language you pick below. Downloads a " +
-                            "model the first time."
-                },
-            )
-            Help(
-                "These are two different things, which is why they are two different " +
-                    "choices. NetEase and the AMLL database ship human translations with the " +
-                    "lyrics: nothing to download, nothing sent anywhere, available the " +
-                    "instant the words are — but a Japanese song is usually translated into " +
-                    "Chinese, because that is who transcribed it. On-device translation is " +
-                    "ML Kit running on your phone, into the language you asked for, and it " +
-                    "replaces whatever the source supplied rather than leaving you reading " +
-                    "a language you did not choose. It still sends nothing anywhere; the " +
-                    "cost is a one-off model download per language pair.",
-            )
-
-            if (settings.translationSource == TranslationSource.DEVICE) {
-                ChipGroup(
-                    label = "Translate into",
-                    options = TRANSLATION_TARGETS,
-                    selected = settings.translationTarget,
-                    accent = accent,
-                    perRow = 4,
-                    onSelect = { store.setTranslationTarget(it) },
-                )
-                ToggleRow(
-                    title = "Download models on Wi-Fi only",
-                    subtitle = "Each language is roughly 30 MB",
-                    checked = settings.translationWifiOnly,
-                    accent = accent,
-                    onCheckedChange = { store.setTranslationWifiOnly(it) },
+                    "Every enabled source is asked at once and the best answer wins — " +
+                        "word-by-word beats line-by-line. Order breaks ties.",
                 )
                 Help(
-                    "Only affects the one-off model download, not the translating itself, " +
-                        "which is offline.",
+                    "Asking in parallel rather than in turn is why a track resolves in one round " +
+                        "trip instead of five. A source you have not given a token to is skipped " +
+                        "rather than queried, so leaving it enabled costs nothing. Results are " +
+                        "cached for 30 days, so each source is asked at most once per track.",
                 )
-            }
 
-            // ---- providers -------------------------------------------------
-            Divider()
-            SectionTitle("Where lyrics come from")
-            Hint(
-                "Every enabled source is asked at once and the best answer wins — " +
-                    "word-by-word beats line-by-line. Order breaks ties.",
-            )
-            Help(
-                "Asking in parallel rather than in turn is why a track resolves in one round " +
-                    "trip instead of five. A source you have not given a token to is skipped " +
-                    "rather than queried, so leaving it enabled costs nothing. Results are " +
-                    "cached for 30 days, so each source is asked at most once per track.",
-            )
+                settings.providerOrder.forEachIndexed { index, id ->
+                    val info = PROVIDER_INFO[id] ?: ProviderInfo(id, "")
+                    val provider = container.providers.firstOrNull { it.id == id }
+                    val configured = provider?.isConfigured ?: true
+                    ProviderRow(
+                        title = info.title,
+                        subtitle = if (configured) info.description else (info.needs ?: info.description),
+                        warn = !configured,
+                        enabled = id in settings.enabledProviders,
+                        canMoveUp = index > 0,
+                        canMoveDown = index < settings.providerOrder.lastIndex,
+                        accent = accent,
+                        onToggle = { store.setProviderEnabled(id, it) },
+                        onMoveUp = {
+                            store.setProviderOrder(settings.providerOrder.swapped(index, index - 1))
+                        },
+                        onMoveDown = {
+                            store.setProviderOrder(settings.providerOrder.swapped(index, index + 1))
+                        },
+                    )
+                }
 
-            settings.providerOrder.forEachIndexed { index, id ->
-                val info = PROVIDER_INFO[id] ?: ProviderInfo(id, "")
-                val provider = container.providers.firstOrNull { it.id == id }
-                val configured = provider?.isConfigured ?: true
-                ProviderRow(
-                    title = info.title,
-                    subtitle = if (configured) info.description else (info.needs ?: info.description),
-                    warn = !configured,
-                    enabled = id in settings.enabledProviders,
-                    canMoveUp = index > 0,
-                    canMoveDown = index < settings.providerOrder.lastIndex,
+                ToggleRow(
+                    title = "Look up the next track early",
+                    subtitle = "Only when the player says what is queued next",
+                    checked = settings.prefetchNextTrack,
                     accent = accent,
-                    onToggle = { store.setProviderEnabled(id, it) },
-                    onMoveUp = {
-                        store.setProviderOrder(settings.providerOrder.swapped(index, index - 1))
-                    },
-                    onMoveDown = {
-                        store.setProviderOrder(settings.providerOrder.swapped(index, index + 1))
-                    },
+                    onCheckedChange = { store.setPrefetchNextTrack(it) },
+                )
+                Help(
+                    "Fetches the queued track's lyrics while the current one is still playing, " +
+                        "so they are on screen the moment it changes — and are there later even " +
+                        "with no signal. Most players publish no queue at all (Spotify among " +
+                        "them), in which case this does nothing rather than guessing. It always " +
+                        "waits for the track on screen to resolve first, and a track it fails to " +
+                        "find is looked up again properly when it actually plays.",
                 )
             }
 
-            ToggleRow(
-                title = "Look up the next track early",
-                subtitle = "Only when the player says what is queued next",
-                checked = settings.prefetchNextTrack,
+            Section(
+                title = "Tokens and endpoints",
+                subtitle = "All optional, all stay on this device",
+                open = openSection == "tokens",
                 accent = accent,
-                onCheckedChange = { store.setPrefetchNextTrack(it) },
-            )
-            Help(
-                "Fetches the queued track's lyrics while the current one is still playing, " +
-                    "so they are on screen the moment it changes — and are there later even " +
-                    "with no signal. Most players publish no queue at all (Spotify among " +
-                    "them), in which case this does nothing rather than guessing. It always " +
-                    "waits for the track on screen to resolve first, and a track it fails to " +
-                    "find is looked up again properly when it actually plays.",
-            )
+                onToggle = { openSection = if (openSection == "tokens") null else "tokens" },
+            ) {
+                Hint(
+                    "All optional. Every field here stays on this device, and each provider " +
+                        "simply stays quiet without what it needs.",
+                )
+                Help(
+                    "These are your own credentials, read from a browser session you are already " +
+                        "signed in to — there is no app account and no server in between. They " +
+                        "are stored in this app's private preferences and sent only to the " +
+                        "service they belong to.",
+                )
 
-            // ---- keys ------------------------------------------------------
-            Divider()
-            SectionTitle("Tokens and endpoints")
-            Hint(
-                "All optional. Every field here stays on this device, and each provider " +
-                    "simply stays quiet without what it needs.",
-            )
-            Help(
-                "These are your own credentials, read from a browser session you are already " +
-                    "signed in to — there is no app account and no server in between. They " +
-                    "are stored in this app's private preferences and sent only to the " +
-                    "service they belong to.",
-            )
+                SecretField(
+                    label = "Spotify sp_dc cookie",
+                    help = "Sign in at open.spotify.com in a browser, copy the sp_dc cookie. It " +
+                        "unlocks Spotify's own lyrics — matched to the exact track rather than " +
+                        "searched for by name — and, with the toggle above, the artist image, " +
+                        "the full-size cover and the song's tempo.",
+                    value = settings.spDcCookie.orEmpty(),
+                    accent = accent,
+                    onChange = { store.updateSpDcCookie(it) },
+                )
 
-            SecretField(
-                label = "Spotify sp_dc cookie",
-                help = "Sign in at open.spotify.com in a browser, copy the sp_dc cookie. It " +
-                    "unlocks Spotify's own lyrics — matched to the exact track rather than " +
-                    "searched for by name — and, with the toggle above, the artist image, " +
-                    "the full-size cover and the song's tempo.",
-                value = settings.spDcCookie.orEmpty(),
-                accent = accent,
-                onChange = { store.updateSpDcCookie(it) },
-            )
+                SecretField(
+                    label = "Apple Music developer token",
+                    help = "A JWT. Apple's web player embeds one; it is valid for months.",
+                    value = settings.appleDeveloperToken.orEmpty(),
+                    accent = accent,
+                    onChange = { store.updateAppleDeveloperToken(it) },
+                )
 
-            SecretField(
-                label = "Apple Music developer token",
-                help = "A JWT. Apple's web player embeds one; it is valid for months.",
-                value = settings.appleDeveloperToken.orEmpty(),
-                accent = accent,
-                onChange = { store.updateAppleDeveloperToken(it) },
-            )
+                SecretField(
+                    label = "Apple Music user token",
+                    help = "The `media-user-token` cookie from a signed-in music.apple.com " +
+                        "session. Needs an active subscription.",
+                    value = settings.appleMusicUserToken.orEmpty(),
+                    accent = accent,
+                    onChange = { store.updateAppleMusicUserToken(it) },
+                )
 
-            SecretField(
-                label = "Apple Music user token",
-                help = "The `media-user-token` cookie from a signed-in music.apple.com " +
-                    "session. Needs an active subscription.",
-                value = settings.appleMusicUserToken.orEmpty(),
-                accent = accent,
-                onChange = { store.updateAppleMusicUserToken(it) },
-            )
+                SecretField(
+                    label = "Apple Music storefront",
+                    help = "Two-letter country code for the catalogue to search, e.g. us, gb, jp.",
+                    value = settings.appleStorefront,
+                    accent = accent,
+                    onChange = { store.updateAppleStorefront(it) },
+                )
 
-            SecretField(
-                label = "Apple Music storefront",
-                help = "Two-letter country code for the catalogue to search, e.g. us, gb, jp.",
-                value = settings.appleStorefront,
-                accent = accent,
-                onChange = { store.updateAppleStorefront(it) },
-            )
+                SecretField(
+                    label = "Musixmatch user token",
+                    help = "Optional. A token from the Musixmatch desktop app covers more of the " +
+                        "catalogue than the anonymous one this app can mint for itself.",
+                    value = settings.musixmatchUserToken.orEmpty(),
+                    accent = accent,
+                    onChange = { store.updateMusixmatchUserToken(it) },
+                )
 
-            SecretField(
-                label = "Musixmatch user token",
-                help = "Optional. A token from the Musixmatch desktop app covers more of the " +
-                    "catalogue than the anonymous one this app can mint for itself.",
-                value = settings.musixmatchUserToken.orEmpty(),
-                accent = accent,
-                onChange = { store.updateMusixmatchUserToken(it) },
-            )
+                SecretField(
+                    label = "AMLL TTML instance",
+                    help = "The community lyrics index. The default is the project's own server, " +
+                        "run by volunteers — if you use it heavily, run your own copy of " +
+                        "amll-ttml-api and point this at it.",
+                    value = settings.amllBaseUrl,
+                    accent = accent,
+                    onChange = { store.updateAmllBaseUrl(it) },
+                )
 
-            SecretField(
-                label = "AMLL TTML instance",
-                help = "The community lyrics index. The default is the project's own server, " +
-                    "run by volunteers — if you use it heavily, run your own copy of " +
-                    "amll-ttml-api and point this at it.",
-                value = settings.amllBaseUrl,
-                accent = accent,
-                onChange = { store.updateAmllBaseUrl(it) },
-            )
+                SecretField(
+                    label = "LRCLIB instance",
+                    help = "Point at your own mirror if you run one.",
+                    value = settings.lrcLibBaseUrl,
+                    accent = accent,
+                    onChange = { store.updateLrcLibBaseUrl(it) },
+                )
 
-            SecretField(
-                label = "LRCLIB instance",
-                help = "Point at your own mirror if you run one.",
-                value = settings.lrcLibBaseUrl,
-                accent = accent,
-                onChange = { store.updateLrcLibBaseUrl(it) },
-            )
+                SecretField(
+                    label = "NetEase instance",
+                    help = "Point at a self-hosted NetEase API if the public one is blocked for you.",
+                    value = settings.neteaseBaseUrl,
+                    accent = accent,
+                    onChange = { store.updateNeteaseBaseUrl(it) },
+                )
 
-            SecretField(
-                label = "NetEase instance",
-                help = "Point at a self-hosted NetEase API if the public one is blocked for you.",
-                value = settings.neteaseBaseUrl,
-                accent = accent,
-                onChange = { store.updateNeteaseBaseUrl(it) },
-            )
-
-            SecretField(
-                label = "NetEase cookie",
-                help = "Optional. Raises the per-IP limits and unlocks some regional catalogues.",
-                value = settings.neteaseCookie.orEmpty(),
-                accent = accent,
-                onChange = { store.updateNeteaseCookie(it) },
-            )
-
-            // ---- this track ------------------------------------------------
-            Divider()
-            SectionTitle("This track")
-
-            ActionRow(
-                title = "Copy all the lyrics",
-                subtitle = "Puts the whole song on the clipboard",
-                accent = accent,
-                onClick = onCopyAll,
-            )
-
-            // Only offered when there is something to remove: importing the wrong file
-            // otherwise leaves no way back, because a local file outranks every provider.
-            var localRemoved by remember { mutableStateOf(false) }
-            val hasLocal by produceState(initialValue = false, localRemoved) {
-                value = !localRemoved && container.lyrics.hasLocal()
+                SecretField(
+                    label = "NetEase cookie",
+                    help = "Optional. Raises the per-IP limits and unlocks some regional catalogues.",
+                    value = settings.neteaseCookie.orEmpty(),
+                    accent = accent,
+                    onChange = { store.updateNeteaseCookie(it) },
+                )
             }
-            if (hasLocal) {
+
+            Section(
+                title = "This track",
+                subtitle = "Copy, import, look it up again",
+                open = openSection == "track",
+                accent = accent,
+                onToggle = { openSection = if (openSection == "track") null else "track" },
+            ) {
+
                 ActionRow(
-                    title = "Forget the imported lyrics file",
-                    subtitle = "Goes back to looking this track up online",
+                    title = "Copy all the lyrics",
+                    subtitle = "Puts the whole song on the clipboard",
+                    accent = accent,
+                    onClick = onCopyAll,
+                )
+
+                // Only offered when there is something to remove: importing the wrong file
+                // otherwise leaves no way back, because a local file outranks every provider.
+                var localRemoved by remember { mutableStateOf(false) }
+                val hasLocal by produceState(initialValue = false, localRemoved) {
+                    value = !localRemoved && container.lyrics.hasLocal()
+                }
+                if (hasLocal) {
+                    ActionRow(
+                        title = "Forget the imported lyrics file",
+                        subtitle = "Goes back to looking this track up online",
+                        accent = accent,
+                        onClick = {
+                            scope.launch {
+                                container.lyrics.removeLocal()
+                                localRemoved = true
+                            }
+                        },
+                    )
+                }
+
+                ActionRow(
+                    title = "Look this track up again",
+                    subtitle = "Drops it from the cache and asks every source afresh",
+                    accent = accent,
+                    onClick = { container.lyrics.retry() },
+                )
+            }
+
+            Section(
+                title = "Storage",
+                subtitle = "The lyrics cache",
+                open = openSection == "storage",
+                accent = accent,
+                onToggle = { openSection = if (openSection == "storage") null else "storage" },
+            ) {
+
+                var cacheCleared by remember { mutableStateOf(false) }
+                val cacheSize by produceState(initialValue = -1L, cacheCleared) {
+                    value = container.lyricsCacheSizeBytes()
+                }
+                ActionRow(
+                    title = if (cacheCleared) "Cache cleared" else "Clear the lyrics cache",
+                    subtitle = when {
+                        cacheCleared -> "Forces a fresh lookup for every track"
+                        cacheSize < 0 -> "Forces a fresh lookup for every track"
+                        else -> "%.1f MB stored · forces a fresh lookup for every track"
+                            .format(cacheSize / 1_048_576f)
+                    },
                     accent = accent,
                     onClick = {
                         scope.launch {
-                            container.lyrics.removeLocal()
-                            localRemoved = true
+                            container.lyrics.clearCache()
+                            cacheCleared = true
                         }
                     },
                 )
             }
 
-            ActionRow(
-                title = "Look this track up again",
-                subtitle = "Drops it from the cache and asks every source afresh",
+            Section(
+                title = "About",
+                subtitle = "Version, updates, credits",
+                open = openSection == "about",
                 accent = accent,
-                onClick = { container.lyrics.retry() },
-            )
+                onToggle = { openSection = if (openSection == "about") null else "about" },
+            ) {
 
-            // ---- storage ---------------------------------------------------
-            Divider()
-            SectionTitle("Storage")
-
-            var cacheCleared by remember { mutableStateOf(false) }
-            val cacheSize by produceState(initialValue = -1L, cacheCleared) {
-                value = container.lyricsCacheSizeBytes()
-            }
-            ActionRow(
-                title = if (cacheCleared) "Cache cleared" else "Clear the lyrics cache",
-                subtitle = when {
-                    cacheCleared -> "Forces a fresh lookup for every track"
-                    cacheSize < 0 -> "Forces a fresh lookup for every track"
-                    else -> "%.1f MB stored · forces a fresh lookup for every track"
-                        .format(cacheSize / 1_048_576f)
-                },
-                accent = accent,
-                onClick = {
-                    scope.launch {
-                        container.lyrics.clearCache()
-                        cacheCleared = true
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_brand_on_dark),
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(11.dp)),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Better Lyrics",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Version ${updater.currentVersion} " +
+                                "(build ${updater.currentVersionCode})" +
+                                if (!updater.canUpdateInPlace) " · debug" else "",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 12.sp,
+                        )
                     }
-                },
-            )
-
-            // ---- about -----------------------------------------------------
-            Divider()
-            SectionTitle("About")
-
-            if (songWriters.isNotEmpty()) {
-                Text(
-                    text = "Written by ${songWriters.joinToString(", ")}",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(bottom = 10.dp),
-                )
-            }
-
-            ActionRow(
-                title = "Read the welcome guide again",
-                subtitle = "What is required, what is optional, and what each token adds",
-                accent = accent,
-                onClick = onShowWelcome,
-            )
-
-            ActionRow(
-                title = "Credits and licences",
-                subtitle = "Built on Spicy Lyrics, and who else made this possible",
-                accent = accent,
-                onClick = { showCredits = true },
-            )
-
-            // ---- developer -------------------------------------------------
-            Divider()
-            SectionTitle("Developer")
-
-            ToggleRow(
-                title = "Developer options",
-                subtitle = "For testing a lyrics server of your own",
-                checked = settings.developerMode,
-                accent = accent,
-                onCheckedChange = { store.setDeveloperMode(it) },
-            )
-            Help(
-                "Nothing here is needed to use the app, and with this off none of it is " +
-                    "reachable — a server URL left in preferences stops being used the moment " +
-                    "the switch goes off, rather than quietly answering.",
-            )
-
-            if (settings.developerMode) {
-                SecretField(
-                    label = "Cache server URL",
-                    help = "A server of your own that sits in front of the free sources and " +
-                        "remembers what it fetched. Leave empty to not use one. Sent as " +
-                        "GET {url}/v1/lyrics?title=&artist=&album=&durationMs=&spotifyId= — " +
-                        "TTML, LRC, or JSON wrapping either is accepted.",
-                    value = settings.cacheServerUrl.orEmpty(),
-                    accent = accent,
-                    onChange = { store.updateCacheServerUrl(it) },
-                )
-
-                SecretField(
-                    label = "Cache server key",
-                    help = "Only needed if the server is not on your own network. A server " +
-                        "holding an Apple Music token should not answer strangers, so one " +
-                        "reachable from further away will want a key — it prints one when it " +
-                        "starts. Leave empty for a server on your Wi-Fi, which should let a " +
-                        "lookup through without it.",
-                    value = settings.cacheServerKey.orEmpty(),
-                    accent = accent,
-                    onChange = { store.updateCacheServerKey(it) },
-                )
-
-                ChipGroup(
-                    label = "How to use it",
-                    options = CacheServerMode.entries.map { it to it.label },
-                    selected = settings.cacheServerMode,
-                    accent = accent,
-                    onSelect = { store.setCacheServerMode(it) },
-                )
-                Hint(
-                    when (settings.cacheServerMode) {
-                        CacheServerMode.PARALLEL ->
-                            "Asked first, alongside every source you have enabled. The best " +
-                                "answer still wins, so the app keeps working whatever the " +
-                                "server does — and the server sees every track you play."
-                        CacheServerMode.ONLY ->
-                            "The only source asked. Nothing falls back, so a track with no " +
-                                "lyrics means the server could not answer it."
-                    },
-                )
-                Help(
-                    "Two modes because they answer different questions. Alongside is for " +
-                        "filling the cache while the server is still being written: real " +
-                        "traffic reaches it, and a gap in it costs you nothing because the " +
-                        "ordinary sources are answering too. Only is for testing the server " +
-                        "itself — when nothing else can answer, what it is missing becomes " +
-                        "visible. Your own imported files still win in either mode, and " +
-                        "results are still cached on the phone, so use \u201cLook this track " +
-                        "up again\u201d above when you want to force a fresh request.",
-                )
-
-                if (settings.cacheServerUrl.isNullOrBlank()) {
-                    Hint("No URL set, so the cache server is not being asked.")
                 }
 
-                // ---- what each source actually said --------------------------
-                var probe by remember { mutableStateOf<List<LyricsRepository.SourceReport>?>(null) }
-                var probing by remember { mutableStateOf(false) }
+                Text(
+                    "Word-by-word lyrics for whatever your phone is playing. A port of " +
+                        "Spicy Lyrics' renderer to Android, under the AGPL-3.0.",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
 
+                // ---- updates ------------------------------------------------
+                ToggleRow(
+                    title = "Check for updates automatically",
+                    subtitle = "On launch, at most every few hours",
+                    checked = settings.autoUpdateCheck,
+                    accent = accent,
+                    onCheckedChange = { store.setAutoUpdateCheck(it) },
+                )
+                Help(
+                    "There is no app store here, so nothing else will ever mention that a fix " +
+                        "exists. This asks GitHub what the newest release is — one small " +
+                        "request, no account — and downloads nothing until you say so. " +
+                        "Installing goes through Android's own confirmation screen, and " +
+                        "Android refuses an APK that is not signed with the same key as the " +
+                        "copy you already have.",
+                )
+
+                val updateState by updater.state.collectAsStateWithLifecycle()
                 ActionRow(
-                    title = if (probing) "Asking every source…" else "Test the sources",
-                    subtitle = "Asks each one about this track and reports what came back",
+                    title = when (val state = updateState) {
+                        is Updater.State.Checking -> "Checking…"
+                        is Updater.State.Available -> "Update to ${state.release.versionName}"
+                        is Updater.State.Downloading -> when {
+                            state.fraction < 0f -> "Downloading…"
+                            else -> "Downloading — ${(state.fraction * 100).toInt()}%"
+                        }
+                        is Updater.State.ReadyToInstall -> "Ready to install"
+                        is Updater.State.UpToDate -> "You are up to date"
+                        is Updater.State.Failed -> "Check for updates"
+                        Updater.State.Idle -> "Check for updates"
+                    },
+                    subtitle = when (val state = updateState) {
+                        is Updater.State.Available ->
+                            "You have ${updater.currentVersion} · tap to download and install"
+                        is Updater.State.Failed -> state.message
+                        is Updater.State.UpToDate -> "${updater.currentVersion} is the newest release"
+                        else -> "Asks GitHub for the newest release"
+                    },
                     accent = accent,
                     onClick = {
-                        if (!probing) {
-                            scope.launch {
-                                probing = true
-                                probe = runCatching { container.lyrics.diagnose() }.getOrNull()
-                                probing = false
+                        scope.launch {
+                            when (val state = updateState) {
+                                is Updater.State.Available ->
+                                    updater.downloadAndInstall(state.release)
+
+                                is Updater.State.Downloading -> Unit
+                                else -> updater.check(automatic = false)
                             }
                         }
                     },
                 )
-                Help(
-                    "A source that is switched off, one that cannot reach its endpoint, and " +
-                        "one that reached it and found nothing all look identical from the " +
-                        "lyrics screen — which makes \u201conly some of them work\u201d " +
-                        "impossible to act on. This asks each one directly, ignoring the " +
-                        "cache, and prints what it said.",
+
+                if (!updater.canUpdateInPlace) {
+                    Hint(
+                        "This is a debug build, which installs under a different name — a " +
+                            "release cannot replace it, so updates are not offered.",
+                    )
+                }
+
+                (updateState as? Updater.State.Available)?.let { available ->
+                    ActionRow(
+                        title = "Skip ${available.release.versionName}",
+                        subtitle = "Stops asking until a later release appears",
+                        accent = accent,
+                        onClick = { updater.skip(available.release) },
+                    )
+                }
+
+                // ---- links --------------------------------------------------
+                ActionRow(
+                    title = "Source code and releases",
+                    subtitle = UpdateChecker.REPOSITORY,
+                    accent = accent,
+                    onClick = { openUrl(context, UpdateChecker.RELEASES_URL) },
                 )
 
-                probe?.forEach { report ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Text(
-                            report.name,
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.width(112.dp),
-                        )
-                        Text(
-                            report.outcome,
-                            color = Color.White.copy(alpha = 0.55f),
-                            fontSize = 12.sp,
-                            modifier = Modifier.weight(1f),
-                        )
+                ActionRow(
+                    title = "Report a problem",
+                    subtitle = "Issues on GitHub",
+                    accent = accent,
+                    onClick = {
+                        openUrl(context, "https://github.com/${UpdateChecker.REPOSITORY}/issues")
+                    },
+                )
+
+                ActionRow(
+                    title = "Read the welcome guide again",
+                    subtitle = "What is required, what is optional, and what each token adds",
+                    accent = accent,
+                    onClick = onShowWelcome,
+                )
+
+                ActionRow(
+                    title = "Credits and licences",
+                    subtitle = "Built on Spicy Lyrics, and who else made this possible",
+                    accent = accent,
+                    onClick = { showCredits = true },
+                )
+
+                if (songWriters.isNotEmpty()) {
+                    Text(
+                        text = "This track was written by ${songWriters.joinToString(", ")}",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+            }
+
+            Section(
+                title = "Developer",
+                subtitle = "For testing a server of your own",
+                open = openSection == "developer",
+                accent = accent,
+                onToggle = { openSection = if (openSection == "developer") null else "developer" },
+            ) {
+
+                ToggleRow(
+                    title = "Developer options",
+                    subtitle = "For testing a lyrics server of your own",
+                    checked = settings.developerMode,
+                    accent = accent,
+                    onCheckedChange = { store.setDeveloperMode(it) },
+                )
+                Help(
+                    "Nothing here is needed to use the app, and with this off none of it is " +
+                        "reachable — a server URL left in preferences stops being used the moment " +
+                        "the switch goes off, rather than quietly answering.",
+                )
+
+                if (settings.developerMode) {
+                    SecretField(
+                        label = "Cache server URL",
+                        help = "A server of your own that sits in front of the free sources and " +
+                            "remembers what it fetched. Leave empty to not use one. Sent as " +
+                            "GET {url}/v1/lyrics?title=&artist=&album=&durationMs=&spotifyId= — " +
+                            "TTML, LRC, or JSON wrapping either is accepted.",
+                        value = settings.cacheServerUrl.orEmpty(),
+                        accent = accent,
+                        onChange = { store.updateCacheServerUrl(it) },
+                    )
+
+                    SecretField(
+                        label = "Cache server key",
+                        help = "Only needed if the server is not on your own network. A server " +
+                            "holding an Apple Music token should not answer strangers, so one " +
+                            "reachable from further away will want a key — it prints one when it " +
+                            "starts. Leave empty for a server on your Wi-Fi, which should let a " +
+                            "lookup through without it.",
+                        value = settings.cacheServerKey.orEmpty(),
+                        accent = accent,
+                        onChange = { store.updateCacheServerKey(it) },
+                    )
+
+                    ChipGroup(
+                        label = "How to use it",
+                        options = CacheServerMode.entries.map { it to it.label },
+                        selected = settings.cacheServerMode,
+                        accent = accent,
+                        onSelect = { store.setCacheServerMode(it) },
+                    )
+                    Hint(
+                        when (settings.cacheServerMode) {
+                            CacheServerMode.PARALLEL ->
+                                "Asked first, alongside every source you have enabled. The best " +
+                                    "answer still wins, so the app keeps working whatever the " +
+                                    "server does — and the server sees every track you play."
+                            CacheServerMode.ONLY ->
+                                "The only source asked. Nothing falls back, so a track with no " +
+                                    "lyrics means the server could not answer it."
+                        },
+                    )
+                    Help(
+                        "Two modes because they answer different questions. Alongside is for " +
+                            "filling the cache while the server is still being written: real " +
+                            "traffic reaches it, and a gap in it costs you nothing because the " +
+                            "ordinary sources are answering too. Only is for testing the server " +
+                            "itself — when nothing else can answer, what it is missing becomes " +
+                            "visible. Your own imported files still win in either mode, and " +
+                            "results are still cached on the phone, so use \u201cLook this track " +
+                            "up again\u201d above when you want to force a fresh request.",
+                    )
+
+                    if (settings.cacheServerUrl.isNullOrBlank()) {
+                        Hint("No URL set, so the cache server is not being asked.")
+                    }
+
+                    // ---- what each source actually said --------------------------
+                    var probe by remember { mutableStateOf<List<LyricsRepository.SourceReport>?>(null) }
+                    var probing by remember { mutableStateOf(false) }
+
+                    ActionRow(
+                        title = if (probing) "Asking every source…" else "Test the sources",
+                        subtitle = "Asks each one about this track and reports what came back",
+                        accent = accent,
+                        onClick = {
+                            if (!probing) {
+                                scope.launch {
+                                    probing = true
+                                    probe = runCatching { container.lyrics.diagnose() }.getOrNull()
+                                    probing = false
+                                }
+                            }
+                        },
+                    )
+                    Help(
+                        "A source that is switched off, one that cannot reach its endpoint, and " +
+                            "one that reached it and found nothing all look identical from the " +
+                            "lyrics screen — which makes \u201conly some of them work\u201d " +
+                            "impossible to act on. This asks each one directly, ignoring the " +
+                            "cache, and prints what it said.",
+                    )
+
+                    probe?.forEach { report ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                report.name,
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.width(112.dp),
+                            )
+                            Text(
+                                report.outcome,
+                                color = Color.White.copy(alpha = 0.55f),
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }
@@ -1109,18 +1311,81 @@ private fun List<String>.swapped(a: Int, b: Int): List<String> {
     return out
 }
 
+/**
+ * Open a link in whatever the user browses with.
+ *
+ * Wrapped rather than called directly: a device with no browser at all throws, and an About
+ * screen is not worth crashing over.
+ */
+private fun openUrl(context: android.content.Context, url: String) {
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+}
+
 // ---- building blocks ----------------------------------------------------------
 
+/**
+ * A collapsible group of settings.
+ *
+ * The header is always visible and says what is inside; the contents appear when it is
+ * tapped. Only one is open at a time, so the sheet is never longer than one section plus a
+ * short list of names.
+ */
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text.uppercase(),
-        color = Color.White.copy(alpha = 0.42f),
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(top = 14.dp, bottom = 8.dp),
-    )
+private fun Section(
+    title: String,
+    subtitle: String,
+    open: Boolean,
+    accent: Color,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    color = if (open) accent else Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    subtitle,
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
+            // A chevron drawn as a rotation of one vector, so open and closed cannot drift
+            // apart the way two separate icons would.
+            val rotation by animateFloatAsState(
+                targetValue = if (open) 90f else 0f,
+                label = "sectionChevron",
+            )
+            Icon(
+                AppIcons.ChevronRight,
+                contentDescription = if (open) "Collapse" else "Expand",
+                tint = Color.White.copy(alpha = 0.4f),
+                modifier = Modifier.size(20.dp).rotate(rotation),
+            )
+        }
+        AnimatedVisibility(visible = open) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) { content() }
+        }
+    }
 }
+
 
 @Composable
 private fun Hint(text: String) {
