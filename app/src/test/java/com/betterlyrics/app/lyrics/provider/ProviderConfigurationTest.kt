@@ -115,14 +115,32 @@ class ProviderConfigurationTest {
     }
 
     @Test
-    fun `providers enabled by default need no setup`() {
+    fun `a provider enabled by default must be skippable without its token`() {
+        // Being on by default is fine for a provider that needs a credential, as long as it
+        // says so and is skipped rather than queried. What is not fine is being on and
+        // failing once per track — that is indistinguishable from the app being broken.
         val credentials = FakeCredentials()
-        val needsSetup = setOf(
-            AppleMusicProvider(credentials).id,
-            SpotifyLyricsProvider(credentials).id,
+        val implementations = listOf(
+            AppleMusicProvider(credentials),
+            SpotifyLyricsProvider(credentials),
+            AmllTtmlProvider(credentials),
+            NeteaseProvider(credentials),
+            MusixmatchProvider(credentials),
+            LrcLibProvider(credentials),
         )
-        assertTrue(
-            Settings.DEFAULT_ENABLED_PROVIDERS.none { it in needsSetup },
-        )
+        for (provider in implementations) {
+            if (provider.id !in Settings.DEFAULT_ENABLED_PROVIDERS) continue
+            assertTrue(
+                "${provider.id} is on by default but neither configured nor explained",
+                provider.isConfigured || provider.unavailableReason != null,
+            )
+        }
+    }
+
+    @Test
+    fun `spotify is on by default so that pasting a token is enough`() {
+        // It was off, which meant a token changed nothing until the user also found the
+        // provider list — and nothing said so.
+        assertTrue("spotify" in Settings.DEFAULT_ENABLED_PROVIDERS)
     }
 }

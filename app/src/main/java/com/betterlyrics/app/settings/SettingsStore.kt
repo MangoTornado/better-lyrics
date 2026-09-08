@@ -274,17 +274,32 @@ data class Settings(
 
     companion object {
         val DEFAULT_PROVIDER_ORDER = listOf(
-            // Highest first. `amll` outranks everything token-free because its files are
-            // hand-timed per syllable — the same thing Apple ships, without the account.
-            "local", "applemusic", "amll", "spotify", "netease", "musixmatch", "lrclib",
+            // Highest first, and the order only breaks ties: a word-by-word result always
+            // beats a line-by-line one whatever the order says, because that is the
+            // difference between karaoke and a teleprompter.
+            //
+            // Within a tier this is about how the match was made. Your own file is a
+            // certainty. Apple and Spotify identify the recording — Spotify by the id the
+            // media session handed us, which cannot be the wrong song — so they come before
+            // the databases that have to guess from a title.
+            "local", "applemusic", "spotify", "amll", "netease", "musixmatch", "lrclib",
         )
 
         /**
          * The ones that work with no setup. The rest need a token, or are somebody
          * else's service, so they stay off until asked for.
          */
+        /**
+         * On unless it needs something the user has not given it.
+         *
+         * `spotify` is here despite needing a token: it reports itself unconfigured without
+         * one and is skipped rather than queried, so leaving it on costs nothing — and
+         * leaving it *off* meant pasting a token changed nothing, which is not what anyone
+         * would expect. `applemusic` stays off because it needs two tokens and one of them
+         * is a paid membership away.
+         */
         val DEFAULT_ENABLED_PROVIDERS =
-            setOf("local", "amll", "netease", "musixmatch", "lrclib")
+            setOf("local", "spotify", "amll", "netease", "musixmatch", "lrclib")
 
         const val DEFAULT_LRCLIB_URL = "https://lrclib.net"
         const val DEFAULT_NETEASE_URL = "https://music.163.com"

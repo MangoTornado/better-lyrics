@@ -302,22 +302,22 @@ fun SettingsSheet(
                 )
 
                 ToggleRow(
-                    title = "Use extras from Spotify",
-                    subtitle = if (container.spotifyExtrasAvailable) {
-                        "Artist image, full-size cover art, and pacing the background to the tempo"
-                    } else {
-                        "Unavailable — Spotify closed the endpoint this needed"
-                    },
+                    title = "Artist image and full-size cover",
+                    subtitle = "From Spotify if you have a token, otherwise Apple Music",
                     checked = settings.useSpotifyExtras,
                     accent = accent,
                     onCheckedChange = { store.setUseSpotifyExtras(it) },
                 )
                 Help(
                     "The artist's photo, the cover at full size rather than the thumbnail a " +
-                        "media session publishes, and the tempo — which paces how fast the " +
-                        "background drifts. All of it came through the same web token as " +
-                        "Spotify's lyrics, so all of it stopped when that endpoint closed. " +
-                        "Cover art still comes from whatever the player publishes.",
+                        "media session publishes, and — from Spotify only — the tempo, which " +
+                        "paces how fast the background drifts.\n\nSpotify goes first when " +
+                        "there is a token, because it identifies the track by the id the " +
+                        "player handed over and so cannot be matching the wrong song. Apple " +
+                        "Music is next: it can only match on title and artist, but its " +
+                        "developer token lasts months where Spotify's lasts an hour, so it is " +
+                        "the one still working tomorrow. Both need a token pasted under " +
+                        "Developer. With neither, the cover-art search above is used instead.",
                 )
 
                 ToggleRow(
@@ -783,7 +783,12 @@ fun SettingsSheet(
 
                 SecretField(
                     label = "Apple Music developer token",
-                    help = "A JWT. Apple's web player embeds one; it is valid for months.",
+                    help = "A JWT, valid for months rather than an hour — which makes it the " +
+                        "token worth having. Open music.apple.com, developer tools, Network " +
+                        "tab, and copy the Authorization header off any request to " +
+                        "amp-api.music.apple.com.\n\nOn its own this gets the artist image " +
+                        "and the full-size cover art, no subscription needed. Syllable-level " +
+                        "lyrics need the music user token below as well, and a subscription.",
                     value = settings.appleDeveloperToken.orEmpty(),
                     accent = accent,
                     onChange = { store.updateAppleDeveloperToken(it) },

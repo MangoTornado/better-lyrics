@@ -35,6 +35,8 @@ import com.betterlyrics.app.media.ArtworkSearch
 import com.betterlyrics.app.settings.ArtworkSource
 import android.graphics.Bitmap
 import com.betterlyrics.app.media.TrackInfo
+import com.betterlyrics.app.media.AppleArtwork
+import com.betterlyrics.app.media.APPLE_IMAGE_SIZE
 
 /**
  * Hand-rolled container instead of a DI framework: there are eight objects, they are
@@ -79,6 +81,7 @@ class AppContainer(context: Context) {
     val updater = Updater(context, settings)
 
     private val spotifyExtras = SpotifyExtras(settings)
+    private val appleArtwork = AppleArtwork(settings)
     private val artworkSearch = ArtworkSearch()
 
     private val _extras = MutableStateFlow(NowPlayingExtras())
@@ -154,6 +157,9 @@ class AppContainer(context: Context) {
     private suspend fun loadSearchedArtwork(track: TrackInfo?, source: ArtworkSource) {
         _searchedArtwork.value = null
         if (track == null || track.isEmpty || source == ArtworkSource.PLAYER) return
+        // A token beats a title search, so do not spend a request competing with one. This is
+        // also why the search is a separate flow: it must not wait on Spotify to find out.
+        if (spotifyExtras.isAvailable || appleArtwork.isAvailable) return
         // Only worth a request when what the player gave us is not good enough.
         if (!artworkSearch.wouldImproveOn(media.snapshot.value.artwork)) return
 
@@ -163,29 +169,58 @@ class AppContainer(context: Context) {
         _searchedArtwork.value = found
     }
 
+    /**
+     * The artist image, the full-size cover and the tempo.
+     *
+     * Spotify first, whenever a token is there: it identifies the track by id rather than by
+     * name, so it cannot be matching the wrong song, and it is the only one of these that has
+     * the tempo. Apple second — it can only match on title and artist, but its token lasts
+     * months rather than an hour, so it is what still works tomorrow.
+     */
     private suspend fun loadExtras(trackId: String?) {
         _extras.value = NowPlayingExtras()
-        if (trackId == null || !settings.current.useSpotifyExtras) return
+        if (!settings.current.useSpotifyExtras) return
+        val track = media.snapshot.value.track
 
-        // Spotify's endpoints now report an outage by throwing rather than returning null,
-        // so a 503 here would otherwise take down the whole collector.
-        val details = runCatching { spotifyExtras.extrasFor(trackId) }.getOrNull() ?: return
-        // Publish the tempo straight away; the images arrive when they arrive.
-        _extras.value = NowPlayingExtras(trackId = trackId, tempo = details.tempo)
+        if (trackId != null) {
+            // Spotify's endpoints report an outage by throwing rather than returning null, so
+            // a 503 here would otherwise take down the whole collector.
+            val details = runCatching { spotifyExtras.extrasFor(trackId) }.getOrNull()
+            if (details != null) {
+                // Publish the tempo straight away; the images arrive when they arrive.
+                _extras.value = NowPlayingExtras(trackId = trackId, tempo = details.tempo)
 
-        val cover = details.coverUrl?.let { url -> runCatching { spotifyExtras.image(url) }.getOrNull() }
-        val artist = details.artistImageUrl?.let { url ->
-            runCatching { spotifyExtras.image(url) }.getOrNull()
+                val cover = details.coverUrl?.let { url ->
+                    runCatching { spotifyExtras.image(url) }.getOrNull()
+                }
+                val artist = details.artistImageUrl?.let { url ->
+                    runCatching { spotifyExtras.image(url) }.getOrNull()
+                }
+
+                // Guard against a track change while the images were downloading.
+                if (media.snapshot.value.track?.spotifyTrackId != trackId) return
+                _extras.value = NowPlayingExtras(
+                    trackId = trackId,
+                    artistImage = artist,
+                    cover = cover,
+                    tempo = details.tempo,
+                )
+                if (cover != null || artist != null) return
+            }
         }
 
-        // Guard against a track change while the images were downloading.
-        if (media.snapshot.value.track?.spotifyTrackId != trackId) return
-        _extras.value = NowPlayingExtras(
-            trackId = trackId,
-            artistImage = artist,
-            cover = cover,
-            tempo = details.tempo,
-        )
+        // Nothing from Spotify — no token, no match, or an expired token. Apple next.
+        if (track == null || !appleArtwork.isAvailable) return
+        val images = runCatching { appleArtwork.imagesFor(track) }.getOrNull() ?: return
+        val cover = images.coverUrl?.let { url ->
+            runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
+        }
+        val artist = images.artistImageUrl?.let { url ->
+            runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
+        }
+        if (cover == null && artist == null) return
+        if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
+        _extras.value = _extras.value.copy(artistImage = artist, cover = cover)
     }
 }
 
