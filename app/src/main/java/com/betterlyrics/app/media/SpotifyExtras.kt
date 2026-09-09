@@ -72,15 +72,29 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
         if (!isAvailable) return@withContext null
         extrasCache[trackId]?.let { return@withContext it }
 
-        var token = SpotifyWebToken.get(credentials) ?: return@withContext null
-        var track = trackDetails(trackId, token)
+        val token = SpotifyWebToken.get(credentials) ?: return@withContext null
+
+        // Two services, kept independent on purpose.
+        //
+        // `api.spotify.com` is rate-limited hard for a web-player token — persistently `429 API rate
+        // limit exceeded`, and it survives a change of address, so the limit follows the token. The
+        // details used to be fetched first and a failure returned from the whole function, which threw
+        // away the tempo as well. The analysis lives on a different host and is keyed by the track id
+        // already in hand, so it never needed the details at all.
+        //
+        // `Http.get` throws for a 429 rather than returning null — 429 means "not now", not "not
+        // here" — so this has to be caught rather than checked for null.
+        var track = runCatching { trackDetails(trackId, token) }.getOrNull()
         if (track == null) {
-            token = SpotifyWebToken.refresh(credentials) ?: return@withContext null
-            track = trackDetails(trackId, token)
+            // Worth one retry with a fresh token, since an expired one looks much the same from here.
+            // Not worth abandoning the tempo over: a null from `refresh` is the ordinary answer for a
+            // harvested token, whose replacement arrives in the background.
+            val renewed = SpotifyWebToken.refresh(credentials)
+            if (renewed != null) track = runCatching { trackDetails(trackId, renewed) }.getOrNull()
         }
 
-        val artistImage = track?.artistId?.let { artistImage(it, token) }
-        val analysis = audioAnalysis(trackId, token)
+        val artistImage = track?.artistId?.let { runCatching { artistImage(it, token) }.getOrNull() }
+        val analysis = runCatching { audioAnalysis(trackId, token) }.getOrNull()
 
         val extras = TrackExtras(
             trackId = trackId,
