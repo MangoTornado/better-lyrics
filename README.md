@@ -153,7 +153,8 @@ a longer explanation under each one — what it changes, and why you might want 
 ## Where lyrics come from
 
 Every enabled source is asked at once and the best answer wins — word-by-word beats
-line-by-line beats unsynced. Order breaks ties.
+line-by-line beats unsynced. Order breaks ties: hold a row's handle in **Settings → Where
+lyrics come from** and drag it up or down.
 
 | Provider | Timing | Needs |
 |---|---|---|

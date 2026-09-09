@@ -56,7 +56,11 @@ import com.betterlyrics.app.settings.PopupShape
 import com.betterlyrics.app.settings.Settings
 import com.betterlyrics.app.settings.TextAnimationStyle
 import com.betterlyrics.app.settings.ViewMode
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import com.betterlyrics.app.ui.components.AppIcons
+import com.betterlyrics.app.ui.components.ReorderableColumn
 import com.betterlyrics.app.settings.TranslationSource
 import com.betterlyrics.app.settings.CacheServerMode
 import com.betterlyrics.app.lyrics.LyricsRepository
@@ -204,10 +208,17 @@ fun SettingsSheet(
         contentColor = Color.White,
     ) {
         androidx.compose.runtime.CompositionLocalProvider(LocalSettingsHelp provides showHelp) {
+        val sheetScroll = rememberScrollState()
+        // Where the scrolling area is on screen, so dragging a source towards the top or bottom
+        // of the sheet can scroll it. Measured on the node outside the scroll modifier, which is
+        // the viewport rather than the content, so this settles once and does not change again
+        // as the sheet scrolls.
+        var viewport by remember { mutableStateOf(Rect.Zero) }
         Column(
             Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .onGloballyPositioned { viewport = it.boundsInWindow() }
+                .verticalScroll(sheetScroll)
                 .padding(horizontal = 20.dp)
                 .navigationBarsPadding(),
         ) {
@@ -741,7 +752,8 @@ fun SettingsSheet(
             ) {
                 Hint(
                     "Every enabled source is asked at once and the best answer wins — " +
-                        "word-by-word beats line-by-line. Order breaks ties.",
+                        "word-by-word beats line-by-line. Order breaks ties. Hold a handle to " +
+                        "drag a source up or down.",
                 )
                 Help(
                     "Asking in parallel rather than in turn is why a track resolves in one round " +
@@ -756,7 +768,18 @@ fun SettingsSheet(
                 val listed = settings.providerOrder.filter {
                     it != "cacheserver" || settings.developerMode
                 }
-                listed.forEachIndexed { index, id ->
+                ReorderableColumn(
+                    items = listed,
+                    keyOf = { it },
+                    scroll = sheetScroll,
+                    viewportInWindow = { viewport },
+                    // The rows are a filtered view of the stored order, so the new order is
+                    // written back over the slots that were visible and anything hidden — a cache
+                    // server with developer options off — keeps the place it had.
+                    onReordered = { order ->
+                        store.setProviderOrder(settings.providerOrder.withVisibleOrder(order))
+                    },
+                ) { id, raised, handle ->
                     val info = PROVIDER_INFO[id] ?: ProviderInfo(id, "")
                     val provider = container.providers.firstOrNull { it.id == id }
                     val configured = provider?.isConfigured ?: true
@@ -765,25 +788,10 @@ fun SettingsSheet(
                         subtitle = if (configured) info.description else (info.needs ?: info.description),
                         warn = !configured,
                         enabled = id in settings.enabledProviders,
-                        canMoveUp = index > 0,
-                        canMoveDown = index < listed.lastIndex,
+                        raised = raised,
+                        handle = handle,
                         accent = accent,
                         onToggle = { store.setProviderEnabled(id, it) },
-                        // Swapped with the neighbouring *visible* row, resolved back to its real
-                        // position. The list shown is not always the list stored — a hidden cache
-                        // server sits in the order without a row — so moving by the visible index
-                        // would reorder the wrong pair, and stepping over the hidden entry is the
-                        // behaviour the arrow appears to promise anyway.
-                        onMoveUp = {
-                            store.setProviderOrder(
-                                settings.providerOrder.swappedIds(id, listed.getOrNull(index - 1)),
-                            )
-                        },
-                        onMoveDown = {
-                            store.setProviderOrder(
-                                settings.providerOrder.swappedIds(id, listed.getOrNull(index + 1)),
-                            )
-                        },
                     )
                 }
 
@@ -1640,26 +1648,23 @@ private fun Credit(title: String, body: String, link: String?, accent: Color) {
 }
 
 /**
- * Swap two entries by name rather than by position.
+ * Lay a reordered list of visible ids back over the full stored order.
  *
- * The rows on screen are a filtered view of the stored order, so a visible index is not a stored
- * one. Naming both sides removes the chance of that mismatch entirely.
+ * The rows on screen are a filtered view — a cache server with developer options off sits in the
+ * stored order with no row of its own — so a visible position is not a stored one, and writing
+ * the visible list back as-is would delete whatever it does not show. Instead each slot that held
+ * a visible id takes the next id the user's new order calls for, and anything hidden stays exactly
+ * where it was.
+ *
+ * Refuses anything that is not a rearrangement of the same ids, so a filtered list that has since
+ * changed underneath cannot rewrite the order into something the user did not ask for.
  */
-private fun List<String>.swappedIds(a: String, b: String?): List<String> {
-    if (b == null) return this
-    val from = indexOf(a)
-    val to = indexOf(b)
-    if (from < 0 || to < 0) return this
-    return swapped(from, to)
-}
-
-private fun List<String>.swapped(a: Int, b: Int): List<String> {
-    if (a !in indices || b !in indices) return this
-    val out = toMutableList()
-    val tmp = out[a]
-    out[a] = out[b]
-    out[b] = tmp
-    return out
+internal fun List<String>.withVisibleOrder(visible: List<String>): List<String> {
+    val ids = visible.toSet()
+    if (ids.size != visible.size) return this
+    if (count { it in ids } != visible.size) return this
+    val next = visible.iterator()
+    return map { if (it in ids) next.next() else it }
 }
 
 /**
@@ -1908,17 +1913,32 @@ private fun ProviderRow(
     subtitle: String,
     warn: Boolean,
     enabled: Boolean,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
+    /** True while this row is the one being dragged. */
+    raised: Boolean,
+    /** Attached to the grab handle; hold it to drag the row. */
+    handle: Modifier,
     accent: Color,
     onToggle: (Boolean) -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Left of the name rather than right of the switch: a handle is for the whole row, and
+        // putting it where the row starts keeps every one of them on the same vertical line
+        // however long the description underneath runs.
+        Box(
+            handle.size(38.dp).clip(CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                AppIcons.DragHandle,
+                contentDescription = "Reorder $title",
+                tint = Color.White.copy(alpha = if (raised) 0.9f else 0.35f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(4.dp))
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 15.sp)
             if (subtitle.isNotEmpty()) {
@@ -1933,12 +1953,6 @@ private fun ProviderRow(
                 )
             }
         }
-        if (canMoveUp) {
-            IconTap(AppIcons.ArrowUpward, "Move $title up", onMoveUp)
-        }
-        if (canMoveDown) {
-            IconTap(AppIcons.ArrowDownward, "Move $title down", onMoveDown)
-        }
         Switch(
             checked = enabled,
             onCheckedChange = onToggle,
@@ -1946,25 +1960,6 @@ private fun ProviderRow(
                 checkedTrackColor = accent.copy(alpha = 0.6f),
                 checkedThumbColor = Color.White,
             ),
-        )
-    }
-}
-
-@Composable
-private fun IconTap(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
-    onClick: () -> Unit,
-) {
-    Box(
-        Modifier.size(30.dp).clip(CircleShape).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = description,
-            tint = Color.White.copy(alpha = 0.55f),
-            modifier = Modifier.size(17.dp),
         )
     }
 }
