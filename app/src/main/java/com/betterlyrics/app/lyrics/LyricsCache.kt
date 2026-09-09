@@ -26,7 +26,31 @@ class LyricsCache(context: Context) {
     private data class Entry(
         val savedAtMs: Long,
         val document: LyricsDocument? = null,
+        /**
+         * What each source said, by provider id — see [Outcome].
+         *
+         * Kept because the cached document is only the *winner*, which says nothing about who else
+         * was asked. Without this a track cached while a source was off, unconfigured or simply down
+         * kept the poorer answer for the full thirty days, and nothing knew a better one had been
+         * missed. Defaulted to empty so entries written by an older version still load.
+         */
+        val outcomes: Map<String, String> = emptyMap(),
+        /**
+         * When those outcomes were recorded, which is not when the document was saved.
+         *
+         * Separate so that re-asking a source does not extend the document's life: [savedAtMs] keeps
+         * meaning "how old are these words", and the retry window is measured from here.
+         */
+        val outcomesAtMs: Long = 0L,
     )
+
+    /**
+     * How a source answered when it was last asked about a track.
+     *
+     * [NONE] is an answer and [FAILED] is not, which is the whole distinction: one is settled, the
+     * other is worth trying again once whatever went wrong has had time to stop.
+     */
+    enum class Outcome { LYRICS, NONE, FAILED }
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -57,7 +81,14 @@ class LyricsCache(context: Context) {
             return@withContext null
         }
 
-        Result.Hit(entry.document)
+        Result.Hit(
+            document = entry.document,
+            savedAtMs = entry.savedAtMs,
+            outcomes = entry.outcomes.mapNotNull { (id, name) ->
+                runCatching { Outcome.valueOf(name) }.getOrNull()?.let { id to it }
+            }.toMap(),
+            outcomesAtMs = entry.outcomesAtMs,
+        )
     }
 
     /**
@@ -68,12 +99,26 @@ class LyricsCache(context: Context) {
      * per play of an untranscribed song is a cost worth paying — and it is bounded, because
      * a track only resolves once while it is playing.
      */
-    suspend fun put(key: String, document: LyricsDocument?) = withContext(Dispatchers.IO) {
+    suspend fun put(
+        key: String,
+        document: LyricsDocument?,
+        outcomes: Map<String, Outcome> = emptyMap(),
+        /** Null keeps the age of whatever is already stored — for an upgrade, which is not a new find. */
+        savedAtMs: Long? = null,
+    ) = withContext(Dispatchers.IO) {
         if (document == null) return@withContext
+        val now = System.currentTimeMillis()
         runCatching {
             directory.mkdirs()
             fileFor(key).writeText(
-                json.encodeToString(Entry(System.currentTimeMillis(), document)),
+                json.encodeToString(
+                    Entry(
+                        savedAtMs = savedAtMs ?: now,
+                        document = document,
+                        outcomes = outcomes.mapValues { (_, outcome) -> outcome.name },
+                        outcomesAtMs = now,
+                    ),
+                ),
             )
             prune()
         }
@@ -110,7 +155,14 @@ class LyricsCache(context: Context) {
             .joinToString("") { "%02x".format(it) }
 
     sealed interface Result {
-        data class Hit(val document: LyricsDocument) : Result
+        data class Hit(
+            val document: LyricsDocument,
+            /** When the words were found, so an upgrade can keep the age rather than reset it. */
+            val savedAtMs: Long = 0L,
+            /** What each source said when this was cached. Empty for an entry written before this. */
+            val outcomes: Map<String, Outcome> = emptyMap(),
+            val outcomesAtMs: Long = 0L,
+        ) : Result
     }
 
     private companion object {

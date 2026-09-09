@@ -40,6 +40,7 @@ import com.betterlyrics.app.media.TrackInfo
 import com.betterlyrics.app.media.AppleArtwork
 import com.betterlyrics.app.media.APPLE_IMAGE_SIZE
 import com.betterlyrics.app.media.CacheServerExtras
+import com.betterlyrics.app.media.ExtrasStore
 import com.betterlyrics.app.media.IsrcStore
 import com.betterlyrics.app.media.ServerSource
 
@@ -104,6 +105,9 @@ class AppContainer(context: Context) {
     private val cacheServerExtras = CacheServerExtras(settings)
 
     private val artworkSearch = ArtworkSearch()
+
+    /** Tempo and artwork addresses, kept so an expired token cannot take them away. */
+    private val extrasStore = ExtrasStore(context)
 
     private val _extras = MutableStateFlow(NowPlayingExtras())
 
@@ -231,6 +235,33 @@ class AppContainer(context: Context) {
         val trackId = track.spotifyTrackId
         val settingsNow = settings.current
 
+        // What was learned about this track before anything expired. The tempo goes up immediately:
+        // it needs no download, and it is the one field here that a token may never be able to
+        // supply again. The images follow from addresses that need no credential at all, which is why
+        // artwork keeps working months after the token that found it stopped.
+        val remembered = extrasStore.get(track.cacheKey)
+        if (remembered != null) {
+            _extras.value = NowPlayingExtras(trackId = trackId, tempo = remembered.tempo)
+            val cover = remembered.coverUrl?.let { url ->
+                runCatching { spotifyExtras.image(url) }.getOrNull()
+            }
+            val artist = remembered.artistImageUrl?.let { url ->
+                runCatching { spotifyExtras.image(url) }.getOrNull()
+            }
+            if (media.snapshot.value.track?.cacheKey != track.cacheKey) return
+            if (cover != null || artist != null) {
+                _extras.value = NowPlayingExtras(
+                    trackId = trackId,
+                    artistImage = artist,
+                    cover = cover,
+                    tempo = remembered.tempo,
+                )
+                // A cover is the expensive thing to find. With one in hand there is nothing left
+                // worth a token, so the sources below are not troubled at all.
+                if (cover != null) return
+            }
+        }
+
         if (trackId != null) {
             // Spotify's endpoints report an outage by throwing rather than returning null, so
             // a 503 here would otherwise take down the whole collector.
@@ -240,6 +271,15 @@ class AppContainer(context: Context) {
                 details.isrc?.let { isrc ->
                     media.snapshot.value.track?.let { lyrics.noteIsrc(it, isrc) }
                 }
+                // Written down for the same reason as the ISRC above: the token expires within
+                // the hour, and Spotify has closed the analysis endpoint to new applications, so a
+                // tempo not kept now may never be obtainable again.
+                extrasStore.put(
+                    track.cacheKey,
+                    tempo = details.tempo,
+                    coverUrl = details.coverUrl,
+                    artistImageUrl = details.artistImageUrl,
+                )
                 // Publish the tempo straight away; the images arrive when they arrive.
                 _extras.value = NowPlayingExtras(trackId = trackId, tempo = details.tempo)
 
@@ -269,6 +309,11 @@ class AppContainer(context: Context) {
             if (images != null) {
                 // The developer token alone gets this, so it works without a subscription.
                 images.isrc?.let { lyrics.noteIsrc(track, it) }
+                extrasStore.put(
+                    track.cacheKey,
+                    coverUrl = images.coverUrl,
+                    artistImageUrl = images.artistImageUrl,
+                )
                 val cover = images.coverUrl?.let { url ->
                     runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
                 }
@@ -290,6 +335,12 @@ class AppContainer(context: Context) {
                 // The server collects these from its own tokens. This is how a phone with none
                 // still gets an exact match.
                 cached.isrc?.let { lyrics.noteIsrc(track, it) }
+                extrasStore.put(
+                    track.cacheKey,
+                    tempo = cached.tempo,
+                    coverUrl = cached.coverUrl,
+                    artistImageUrl = cached.artistImageUrl,
+                )
                 val cover = cached.coverUrl?.let { url ->
                     runCatching { cacheServerExtras.image(url) }.getOrNull()
                 }

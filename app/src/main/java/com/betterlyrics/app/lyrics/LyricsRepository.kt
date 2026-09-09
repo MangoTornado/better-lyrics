@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.TimeUnit
 
 sealed interface LyricsState {
     data object Idle : LyricsState
@@ -103,6 +104,9 @@ class LyricsRepository(
 
     private var fetchJob: Job? = null
     private var currentRequest: LyricsRequest? = null
+
+    /** Tracks already re-asked this run. See [upgradeAfter]. */
+    private val upgraded = HashSet<String>()
 
     private var prefetchJob: Job? = null
 
@@ -375,6 +379,9 @@ class LyricsRepository(
             when (val cached = cache.get(key)) {
                 is LyricsCache.Result.Hit -> {
                     base.value = Base.Ready(key, cached.document)
+                    // Answered from the cache, then quietly improved for next time if anyone was
+                    // never asked. Deliberately after the answer is on screen and never awaited.
+                    upgradeAfter(request, key, cached)
                     return
                 }
 
@@ -401,13 +408,134 @@ class LyricsRepository(
                 // lyrics — and writing "none" into the cache would keep it blank for two
                 // days because an endpoint hiccuped once.
                 if (answer.document != null || !answer.provisional) {
-                    cache.put(key, answer.document)
+                    cache.put(key, answer.document, answer.outcomes)
                 }
                 base.value = answer.document
                     ?.let { Base.Ready(key, it) }
                     ?: Base.NotFound
             }
         }
+    }
+
+    /**
+     * Sources worth asking again about a track that is already cached.
+     *
+     * Only two cases, and the rest are left alone on purpose:
+     *
+     * - **Never asked.** No outcome recorded — the source was off, had no token, or did not exist in
+     *   the version that cached this. It has never had its chance.
+     * - **Did not answer.** A timeout, a transport error, a 5xx. Whatever went wrong may be over, and
+     *   after [RETRY_FAILED_MS] it is worth finding out.
+     *
+     * A source that answered "nothing for this track" is *not* re-asked. That is a real answer, and
+     * asking it again every play would spend a request per source per song on a result that will not
+     * have changed. The thirty-day expiry already covers a catalogue that grows.
+     */
+    private fun staleProviders(
+        settings: Settings,
+        cached: LyricsCache.Result.Hit,
+    ): List<LyricsProvider> = staleProviders(
+        candidates = providersFor(settings, providers, localStore.id),
+        outcomes = cached.outcomes,
+        outcomesAgeMs = System.currentTimeMillis() - cached.outcomesAtMs,
+    )
+
+    /**
+     * Re-asks the sources a cached track never heard from, and keeps a better answer.
+     *
+     * Detached and never awaited: the words are already on screen, and none of this may make a lookup
+     * slower. The improvement shows on the next play — or immediately, if the track is still the one
+     * playing when the answer lands.
+     */
+    private fun upgradeAfter(request: LyricsRequest, key: String, cached: LyricsCache.Result.Hit) {
+        if (!upgraded.add(key)) return
+        // A memo, not a record: it only has to stop the same track being re-asked once per play.
+        if (upgraded.size > 500) upgraded.clear()
+
+        scope.launch {
+            val settings = settingsStore.current
+            val stale = staleProviders(settings, cached)
+            if (stale.isEmpty() || !isOnline()) return@launch
+
+            // Null only when the lookup itself broke, in which case nothing was learned and the
+            // outcomes must stay as they were.
+            val result = queryOnly(request, stale) ?: return@launch
+            val outcomes = cached.outcomes + result.outcomes
+            val better = result.document
+
+            // Strictly better only. An equal answer is churn: it would rewrite the cache and could
+            // swap the words on screen for no gain the reader can see.
+            if (better == null || qualityScore(better) <= qualityScore(cached.document)) {
+                // The document is unchanged, but these sources have now been asked — and recording
+                // that is the whole point, or every play would ask them again.
+                cache.put(key, cached.document, outcomes, cached.savedAtMs)
+                return@launch
+            }
+
+            Log.i(TAG, "upgraded $key to ${better.providerId}")
+            cache.put(key, better, outcomes, cached.savedAtMs)
+
+            // Only if the reader is still looking at this track. Replacing the lyrics under someone
+            // who has moved on would be worse than leaving the cache to do its job next time.
+            if (currentRequest?.cacheIdentity() == key) {
+                derived.keys.removeAll { it.startsWith(key) }
+                base.value = Base.Ready(key, better)
+            }
+        }
+    }
+
+    /**
+     * The best answer from a named subset of the sources, and what each of them said.
+     *
+     * [document] is null when none of them had anything — which is not a failure, and the outcomes
+     * are the valuable part of that answer.
+     */
+    private data class Upgrade(
+        val document: LyricsDocument?,
+        val outcomes: Map<String, LyricsCache.Outcome>,
+    )
+
+    private suspend fun queryOnly(
+        request: LyricsRequest,
+        subset: List<LyricsProvider>,
+    ): Upgrade? {
+        val results = try {
+            coroutineScope {
+                subset.map { provider ->
+                    async {
+                        var failed = false
+                        val finished = withTimeoutOrNull(PROVIDER_TIMEOUT_MS) {
+                            Finished(
+                                runCatching { provider.fetch(request) }
+                                    .onFailure { error ->
+                                        if (error is kotlinx.coroutines.CancellationException) throw error
+                                        failed = true
+                                        Log.w(TAG, "${provider.id} failed during upgrade: ${error.message}")
+                                    }
+                                    .getOrNull(),
+                            )
+                        }
+                        Answer(provider.id, finished?.document, failed || finished == null)
+                    }
+                }.awaitAll()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "upgrade lookup failed: ${e.message}")
+            return null
+        }
+
+        return Upgrade(
+            document = results.mapNotNull { it.document }.maxByOrNull { qualityScore(it) },
+            outcomes = results.associate { answer ->
+                answer.id to when {
+                    answer.failed -> LyricsCache.Outcome.FAILED
+                    answer.document != null -> LyricsCache.Outcome.LYRICS
+                    else -> LyricsCache.Outcome.NONE
+                }
+            },
+        )
     }
 
     /** One provider's contribution to a lookup. */
@@ -434,6 +562,14 @@ class LyricsRepository(
         data class Answered(
             val document: LyricsDocument?,
             val provisional: Boolean = false,
+            /**
+             * What each source said, by provider id.
+             *
+             * Cached alongside the winning document, because the document alone cannot say who else
+             * was asked — and that is exactly what decides whether a later lookup has anyone left
+             * worth asking.
+             */
+            val outcomes: Map<String, LyricsCache.Outcome> = emptyMap(),
         ) : Query
 
         /** The lookup itself failed, which is not the same as the track having no lyrics. */
@@ -488,6 +624,13 @@ class LyricsRepository(
 
         return Query.Answered(
             provisional = results.any { it.failed },
+            outcomes = results.associate { answer ->
+                answer.id to when {
+                    answer.failed -> LyricsCache.Outcome.FAILED
+                    answer.document != null -> LyricsCache.Outcome.LYRICS
+                    else -> LyricsCache.Outcome.NONE
+                }
+            },
             document = results.mapNotNull { (id, document) -> document?.let { id to it } }
                 .maxWithOrNull(
                     compareBy(
@@ -649,9 +792,17 @@ class LyricsRepository(
         spotifyTrackId?.let { "sp:$it" }
             ?: "${title.lowercase().trim()}|${artist.lowercase().trim()}|${durationMs / 2000}"
 
-    private companion object {
+    internal companion object {
         const val TAG = "LyricsRepository"
         const val PROVIDER_TIMEOUT_MS = 12_000L
+
+        /**
+         * How long to leave a source alone after it failed to answer.
+         *
+         * Six hours. Long enough that a service having a bad day is not asked once per play, short
+         * enough that a token fixed this morning is used this afternoon.
+         */
+        val RETRY_FAILED_MS = TimeUnit.HOURS.toMillis(6)
     }
 }
 
@@ -672,6 +823,35 @@ class LyricsRepository(
  * settings object will actually hit is exactly the sort of thing that is easy to get
  * subtly wrong and impossible to notice.
  */
+/**
+ * Which of [candidates] never got to answer about a track that is already cached.
+ *
+ * A top-level function so the rule can be tested without a repository, a context and six providers:
+ * it is a decision about a map, and the consequence of getting it wrong is either a stale answer kept
+ * for a month or a request per source on every play.
+ *
+ * @param outcomes what each source said last time, by provider id. Empty for an entry cached before
+ *   outcomes were recorded — in which case every source counts as never asked, which is right: there
+ *   is no evidence any of them were.
+ * @param outcomesAgeMs how long ago those outcomes were recorded.
+ */
+internal fun staleProviders(
+    candidates: List<LyricsProvider>,
+    outcomes: Map<String, LyricsCache.Outcome>,
+    outcomesAgeMs: Long,
+    retryFailedMs: Long = LyricsRepository.RETRY_FAILED_MS,
+): List<LyricsProvider> = candidates.filter { provider ->
+    when (outcomes[provider.id]) {
+        // Never asked: off, unconfigured, or not present in the version that cached this.
+        null -> true
+        // Did not answer. Whatever went wrong may be over by now.
+        LyricsCache.Outcome.FAILED -> outcomesAgeMs > retryFailedMs
+        // Answered — with lyrics, or with a settled "nothing for this track". Neither is worth
+        // re-asking: one already contributed, and the other will say the same thing.
+        else -> false
+    }
+}
+
 internal fun providersFor(
     settings: Settings,
     providers: List<LyricsProvider>,
