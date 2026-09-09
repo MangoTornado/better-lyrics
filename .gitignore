@@ -16,3 +16,6 @@ captures/
 keystore.properties
 *.jks
 *.p12
+
+# Worktrees this tool creates for isolated work. Never part of the project.
+.claude/worktrees/
