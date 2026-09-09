@@ -268,6 +268,47 @@ class SpotifyBrowserTokenTest {
     }
 
     @Test
+    fun `the origin rules are ones the WebView will accept`() {
+        // This is the crash, pinned. A scheme followed by a bare asterisk is not a valid rule, and
+        // `addDocumentStartJavaScript` validates by throwing — so a wrong shape did not degrade to a
+        // failed harvest, it took the app down the moment the button was pressed.
+        //
+        // Checked against the same rule the platform applies rather than by eye: a host, or a
+        // leading star-dot and a domain. Anything else is rejected.
+        val valid = Regex("^(\\*|[a-z]+://(\\*\\.)?[a-z0-9-]+(\\.[a-z0-9-]+)+(:[0-9]+)?)$")
+        val origins = SpotifyBrowserToken.allowedOriginsForTest()
+
+        assertTrue(origins.isNotEmpty())
+        for (origin in origins) {
+            assertTrue("\"" + origin + "\" is not a valid origin rule", valid.matches(origin))
+        }
+        // And the shape that threw stays out.
+        assertFalse(origins.contains("https://" + "*"))
+        // The player's own origin has to be among them, or the script never runs.
+        assertTrue(origins.any { it == "https://open.spotify.com" || it == "https://*.spotify.com" })
+    }
+
+    @Test
+    fun `a failure inside the WebView is reported, never thrown`() {
+        // The button is a diagnostic behind a developer switch. Whatever the WebView stack throws —
+        // a missing provider, an update in progress, an API rejecting its arguments — has to come
+        // back as a line to read. Crashing while answering "why is this not working" is the one
+        // outcome that helps nobody.
+        val exploding = object : SpotifyBrowserToken(
+            org.robolectric.RuntimeEnvironment.getApplication(),
+        ) {
+            override suspend fun harvest(spDcCookie: String, timeoutMs: Long): Result =
+                Result.Failed("IllegalArgumentException: something the platform rejected")
+        }
+        SpotifyWebToken.harvester = exploding
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+
+        val status = runBlocking { SpotifyWebToken.renewNow(credentials) }
+        assertEquals("IllegalArgumentException: something the platform rejected", status.detail)
+        assertNull(status.token)
+    }
+
+    @Test
     fun `the injected script only reads, and reaches both request paths`() {
         val script = SpotifyBrowserToken.injectedScriptForTest()
 

@@ -4,9 +4,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.util.Log
 import android.webkit.WebView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -81,41 +83,46 @@ open class SpotifyBrowserToken(private val context: Context) {
             )
         }
 
+        // Everything below runs on the main thread, which is where a WebView must be built, used and
+        // destroyed. Holding the whole lifetime inside one `withContext` is what makes the teardown
+        // in `finally` legal: it cannot end up on a coroutine's cancellation thread, which is how a
+        // timeout used to take the app down with "a WebView method was called on thread …".
         return withContext(Dispatchers.Main) {
-            withTimeoutOrNull(timeoutMs) { run(cookie) }
-                ?: Result.Failed(
-                    "the player did not produce a token within ${timeoutMs / 1000}s — " +
-                        "if the cookie has expired, copy a fresh one from a signed-in browser",
+            var view: WebView? = null
+            try {
+                view = WebView(context)
+                configure(view, cookie)
+
+                withTimeoutOrNull(timeoutMs) { awaitToken(view) }
+                    ?: Result.Failed(
+                        "the player did not produce a token within ${timeoutMs / 1000}s — " +
+                            "if the cookie has expired, copy a fresh one from a signed-in browser",
+                    )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                // A dev-menu diagnostic must never be the thing that kills the app. Anything the
+                // WebView stack can throw — a missing provider, an update in progress, an API that
+                // rejects its arguments — becomes a line the user can read and act on.
+                Log.w(TAG, "harvest failed", error)
+                Result.Failed(
+                    "${error.javaClass.simpleName}: ${error.message ?: "no detail"}",
                 )
+            } finally {
+                view?.let {
+                    runCatching {
+                        it.stopLoading()
+                        // The profile holds the session just used, so it does not outlive the job.
+                        it.clearCache(true)
+                        it.destroy()
+                    }
+                }
+            }
         }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun run(cookie: String): Result = suspendCancellableCoroutine { continuation ->
-        val settled = AtomicBoolean(false)
-        var webView: WebView? = null
-
-        fun finish(result: Result) {
-            if (!settled.compareAndSet(false, true)) return
-            webView?.let {
-                it.stopLoading()
-                // The profile holds the session that was just used, so it does not outlive the job.
-                it.clearCache(true)
-                it.destroy()
-            }
-            webView = null
-            if (continuation.isActive) continuation.resume(result)
-        }
-
-        val view = WebView(context)
-        webView = view
-
-        continuation.invokeOnCancellation {
-            // The timeout arrives here. Tearing the view down has to happen on the thread that
-            // built it, and this block already runs there.
-            finish(Result.Failed("cancelled"))
-        }
-
+    private fun configure(view: WebView, cookie: String) {
         view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -133,28 +140,68 @@ open class SpotifyBrowserToken(private val context: Context) {
             setCookie(".spotify.com", "sp_dc=$cookie; Path=/; Secure; HttpOnly; SameSite=None")
             flush()
         }
+    }
+
+    /** Resolves with the first real token the page's own requests carry. */
+    private suspend fun awaitToken(view: WebView): Result = suspendCancellableCoroutine { continuation ->
+        val settled = AtomicBoolean(false)
 
         view.addJavascriptInterface(
-            object {
-                @JavascriptInterface
-                fun onToken(value: String) {
-                    val token = bearerValue(value) ?: return
-                    if (token.length < MIN_TOKEN_LENGTH) return
-                    finish(Result.Harvested(token, SpotifyWebToken.expiryOf(token)))
+            TokenBridge { value ->
+                val token = bearerValue(value) ?: return@TokenBridge
+                if (token.length < MIN_TOKEN_LENGTH) return@TokenBridge
+                if (!settled.compareAndSet(false, true)) return@TokenBridge
+                if (continuation.isActive) {
+                    continuation.resume(Result.Harvested(token, SpotifyWebToken.expiryOf(token)))
                 }
             },
             BRIDGE,
         )
 
-        WebViewCompat.addDocumentStartJavaScript(view, injectedScript(), setOf("https://*"))
+        // Real origins, not a wildcard host: see [ALLOWED_ORIGINS]. Passing the wrong shape threw
+        // out of the button press rather than failing to a message, which is how this crashed.
+        WebViewCompat.addDocumentStartJavaScript(view, injectedScript(), ALLOWED_ORIGINS)
         view.loadUrl(PLAYER_URL)
+    }
+
+    /**
+     * The bridge, as a named class.
+     *
+     * Named rather than an anonymous object so a keep rule can actually name it: R8 strips or
+     * renames what it cannot see being called, and nothing in Kotlin calls this — the page does.
+     * See `proguard-rules.pro`.
+     */
+    private class TokenBridge(private val onValue: (String) -> Unit) {
+        @JavascriptInterface
+        fun onToken(value: String) {
+            onValue(value)
+        }
     }
 
     companion object {
         /** The script, for a test to assert on: it is the part with the delicate contract. */
         fun injectedScriptForTest(): String = injectedScript()
 
+        /** The origin rules, so a test can hand them to the validator that rejected the last set. */
+        fun allowedOriginsForTest(): Set<String> = ALLOWED_ORIGINS
+
+        private const val TAG = "SpotifyBrowserToken"
         private const val PLAYER_URL = "https://open.spotify.com/"
+
+        /**
+         * Where the injected script is allowed to run.
+         *
+         * Real origins, because the rule format does not accept a bare wildcard host — a scheme
+         * followed by only an asterisk is rejected outright, which is what threw straight out of the
+         * button press. A host, or a leading `*.` and a domain, is what it wants.
+         *
+         * The player is one page, so one origin would do; the accounts host is included because a
+         * signed-out session redirects through it.
+         */
+        private val ALLOWED_ORIGINS = setOf(
+            "https://open.spotify.com",
+            "https://*.spotify.com",
+        )
         private const val BRIDGE = "BetterLyricsTokenBridge"
 
         /**
