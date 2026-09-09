@@ -42,7 +42,13 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
 
     override val unavailableReason: String?
         get() = when {
-            // A renewable token is not an errand: say what to fix rather than "copy a fresh one".
+            // A pasted token first, because `get()` prefers one and `refresh()` will not replace
+            // it — so if Spotify refused anything, it refused that. Blaming the cookie here sent
+            // the user to replace a credential that was never used.
+            tokenRejected && !credentials.spotifyWebToken.isNullOrBlank() ->
+                "The pasted access token has expired — copy a fresh one, or clear it to let the " +
+                    "cookie renew instead"
+            // Nothing pasted, so the refusal is the harvested token's, and the cookie behind it.
             tokenRejected && credentials.spotifyBrowserTokenEnabled ->
                 "Spotify refused the token — the sp_dc cookie may have expired"
             tokenRejected -> "The pasted access token has expired — copy a fresh one"

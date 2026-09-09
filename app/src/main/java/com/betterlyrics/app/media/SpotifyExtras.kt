@@ -59,6 +59,11 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
      */
     val isAvailable: Boolean
         get() = SpotifyWebToken.pasted(credentials) != null ||
+            // The same gate the lyrics provider uses, and it has to say the same thing: these read
+            // the artist image, the full-size cover and the tempo with the very token the lyrics
+            // use. Accepting renewal there and not here meant lyrics worked while the artwork it
+            // is drawn over stayed missing.
+            credentials.spotifyBrowserTokenEnabled ||
             (!SpotifyWebToken.BLOCKED_BY_SPOTIFY && !credentials.spDcCookie.isNullOrBlank())
 
     private val extrasCache = LinkedHashMap<String, TrackExtras>()

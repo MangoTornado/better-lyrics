@@ -1,8 +1,12 @@
 package com.betterlyrics.app.lyrics.provider
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -76,16 +80,49 @@ object SpotifyWebToken {
         ) {
             return cached
         }
-        // The one route that still works, when it is switched on: let the real player mint the
-        // token and read what it received. A token lasts about an hour, so this runs a handful of
-        // times a day rather than per lookup — the cache above is what makes that true.
-        harvester?.let { browser ->
-            if (credentials.spotifyBrowserTokenEnabled) {
-                harvest(browser, credentials)?.let { return it }
-            }
-        }
+        // Start one, but do not wait for it. A lookup gets twelve seconds for every source
+        // together, and a cold WebView loading the whole player takes longer than that on its own —
+        // so waiting here meant the lookup cancelled the harvest before it could finish, every
+        // time, and automatic renewal could only ever work by accident.
+        //
+        // So this track goes without Spotify and the next one has a token. Which is the right trade:
+        // the other sources have already answered by now, and the alternative is holding every
+        // lookup open for the best part of a minute.
+        startHarvest(credentials)
         return mint(credentials)
     }
+
+    /**
+     * Runs a harvest in the background, at most one at a time.
+     *
+     * Single-flight because the trigger is "a lookup found no token", and that is true of every
+     * track until one succeeds — without the guard, a playlist would launch a WebView per song.
+     */
+    private fun startHarvest(credentials: ProviderCredentials) {
+        val browser = harvester ?: return
+        if (!credentials.spotifyBrowserTokenEnabled) return
+        if (credentials.spDcCookie.isNullOrBlank()) return
+        if (!inFlight.compareAndSet(false, true)) return
+
+        val scope = externalScope
+        if (scope == null) {
+            inFlight.set(false)
+            return
+        }
+        scope.launch {
+            try {
+                harvest(browser, credentials)
+            } finally {
+                inFlight.set(false)
+            }
+        }
+    }
+
+    /** Set at startup. Lets a harvest outlive the lookup that noticed it was needed. */
+    @Volatile
+    var externalScope: CoroutineScope? = null
+
+    private val inFlight = AtomicBoolean(false)
 
     /**
      * The WebView harvester, if the app has installed one.
@@ -126,23 +163,35 @@ object SpotifyWebToken {
             }
 
         _harvest.value = _harvest.value.copy(running = true, detail = "Asking the player…")
-        return when (val result = browser.harvest(cookie)) {
-            is SpotifyBrowserToken.Result.Harvested -> {
-                credentials.cachedSpotifyToken = result.token
-                // Trust the token's own claim; fall back to the hour Spotify actually grants.
-                val expiresAt = result.expiresAt ?: (System.currentTimeMillis() + 55 * 60_000L)
-                credentials.cachedSpotifyTokenExpiresAt = expiresAt
-                _harvest.value = HarvestStatus(
-                    detail = "Renewed from the cookie",
-                    token = result.token,
-                    expiresAt = expiresAt,
-                )
-                result.token
-            }
+        try {
+            return when (val result = browser.harvest(cookie)) {
+                is SpotifyBrowserToken.Result.Harvested -> {
+                    credentials.cachedSpotifyToken = result.token
+                    // Trust the token's own claim; fall back to the hour Spotify actually grants.
+                    val expiresAt = result.expiresAt ?: (System.currentTimeMillis() + 55 * 60_000L)
+                    credentials.cachedSpotifyTokenExpiresAt = expiresAt
+                    _harvest.value = HarvestStatus(
+                        detail = "Renewed from the cookie",
+                        token = result.token,
+                        expiresAt = expiresAt,
+                    )
+                    result.token
+                }
 
-            is SpotifyBrowserToken.Result.Failed -> {
-                _harvest.value = HarvestStatus(detail = result.reason)
-                null
+                is SpotifyBrowserToken.Result.Failed -> {
+                    _harvest.value = HarvestStatus(detail = result.reason)
+                    null
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            // Neither branch above runs when the caller gives up, so without this the flag stayed
+            // set: Settings sat on "Renewing…" and refused every further click until the process
+            // restarted. Which is exactly what a cancelled harvest used to leave behind.
+            _harvest.value = HarvestStatus(detail = "Cancelled before the player answered")
+            throw cancellation
+        } finally {
+            if (_harvest.value.running) {
+                _harvest.value = _harvest.value.copy(running = false)
             }
         }
     }
@@ -163,8 +212,9 @@ object SpotifyWebToken {
             return HarvestStatus(detail = "No sp_dc cookie is set").also { _harvest.value = it }
         }
 
-        credentials.cachedSpotifyToken = null
-        credentials.cachedSpotifyTokenExpiresAt = 0
+        // The cache is deliberately left alone. The harvest does not consult it, so clearing it
+        // bought nothing — and it meant a renewal that timed out threw away a token that was still
+        // working. Only a success replaces it, inside `harvest`.
         harvest(browser, credentials)
         return _harvest.value
     }
@@ -217,12 +267,9 @@ object SpotifyWebToken {
         credentials.cachedSpotifyToken = null
 
         // A harvested token *can* be replaced, unlike a pasted one — that is the whole point of
-        // having a browser to ask. So a 401 is worth one more attempt before giving up.
-        harvester?.let { browser ->
-            if (credentials.spotifyBrowserTokenEnabled) {
-                harvest(browser, credentials)?.let { return it }
-            }
-        }
+        // having a browser to ask. In the background for the same reason as above: this is still
+        // inside a lookup's twelve seconds, and a browser does not fit in them.
+        startHarvest(credentials)
         return mint(credentials)
     }
 

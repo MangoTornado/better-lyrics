@@ -8,6 +8,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -51,6 +53,10 @@ class SpotifyBrowserTokenTest {
         var calls = 0
             private set
 
+        fun reset() {
+            calls = 0
+        }
+
         override suspend fun harvest(spDcCookie: String, timeoutMs: Long): SpotifyBrowserToken.Result {
             calls++
             return result
@@ -60,6 +66,7 @@ class SpotifyBrowserTokenTest {
     @After
     fun tearDown() {
         SpotifyWebToken.harvester = null
+        SpotifyWebToken.externalScope = null
     }
 
     /** A JWT whose `exp` is [secondsFromNow], with the padding a real token has. */
@@ -99,34 +106,52 @@ class SpotifyBrowserTokenTest {
     }
 
     @Test
-    fun `a harvested token is cached with the expiry it claims`() {
+    fun `a lookup never waits for the browser, it starts one and moves on`() {
         val token = jwt(3600)
         val harvester = RecordingHarvester(
             SpotifyBrowserToken.Result.Harvested(token, SpotifyWebToken.expiryOf(token)),
         )
         SpotifyWebToken.harvester = harvester
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        SpotifyWebToken.externalScope = scope
         val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
 
-        assertEquals(token, runBlocking { SpotifyWebToken.get(credentials) })
+        // A lookup gets twelve seconds for every source together and a cold player load takes
+        // longer, so waiting meant the lookup cancelled the harvest before it could finish — every
+        // time. This track goes without Spotify; the next one has a token.
+        assertNull(runBlocking { SpotifyWebToken.get(credentials) })
+
+        // Started, though, and its result kept.
         assertEquals(1, harvester.calls)
         assertEquals(token, credentials.cachedSpotifyToken)
         // Its own claim, not a guess — so the next launch happens when it actually needs to.
-        val expected = SpotifyWebToken.expiryOf(token)!!
-        assertEquals(expected, credentials.cachedSpotifyTokenExpiresAt)
+        assertEquals(SpotifyWebToken.expiryOf(token)!!, credentials.cachedSpotifyTokenExpiresAt)
+
+        // And the token is there for the lookup after this one.
+        assertEquals(token, runBlocking { SpotifyWebToken.get(credentials) })
     }
 
     @Test
-    fun `the cache means one browser launch, not one per lookup`() {
+    fun `a playlist does not launch a browser per track`() {
         val token = jwt(3600)
         val harvester = RecordingHarvester(
-            SpotifyBrowserToken.Result.Harvested(token, SpotifyWebToken.expiryOf(token)),
+            SpotifyBrowserToken.Result.Failed("still trying"),
         )
         SpotifyWebToken.harvester = harvester
+        SpotifyWebToken.externalScope = CoroutineScope(Dispatchers.Unconfined)
         val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
 
-        // A token lasts about an hour, so launching a WebView per track would be indefensible.
+        // The trigger is "a lookup found no token", which stays true of every track until one
+        // succeeds. Without a single-flight guard that is one WebView per song.
+        repeat(5) { runBlocking { SpotifyWebToken.get(credentials) } }
+        assertEquals(5, harvester.calls)
+
+        // With a valid token in hand, nothing starts at all.
+        harvester.reset()
+        credentials.cachedSpotifyToken = token
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 3_000_000
         repeat(5) { assertEquals(token, runBlocking { SpotifyWebToken.get(credentials) }) }
-        assertEquals(1, harvester.calls)
+        assertEquals(0, harvester.calls)
     }
 
     @Test
@@ -135,12 +160,51 @@ class SpotifyBrowserTokenTest {
             SpotifyBrowserToken.Result.Failed("the cookie has expired"),
         )
         SpotifyWebToken.harvester = harvester
+        SpotifyWebToken.externalScope = CoroutineScope(Dispatchers.Unconfined)
         val credentials = FakeCredentials(spDcCookie = "a-stale-cookie", spotifyBrowserTokenEnabled = true)
 
         assertNull(runBlocking { SpotifyWebToken.get(credentials) })
         // Settings shows this. Without it, "no lyrics" is the only symptom of a stale cookie.
         assertEquals("the cookie has expired", SpotifyWebToken.harvest.value.detail)
         assertNull(credentials.cachedSpotifyToken)
+    }
+
+    @Test
+    fun `a cancelled harvest does not leave the button stuck`() {
+        // The two defects compounded: the lookup timeout cancelled the harvest, and a cancelled
+        // harvest left `running` set — so Settings sat on "Renewing…" and refused every further
+        // click until the process restarted.
+        val cancelling = object : SpotifyBrowserToken(
+            org.robolectric.RuntimeEnvironment.getApplication(),
+        ) {
+            override suspend fun harvest(spDcCookie: String, timeoutMs: Long): Result =
+                throw kotlinx.coroutines.CancellationException("the caller gave up")
+        }
+        SpotifyWebToken.harvester = cancelling
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+
+        runCatching { runBlocking { SpotifyWebToken.renewNow(credentials) } }
+
+        assertFalse("the button would still be disabled", SpotifyWebToken.harvest.value.running)
+        assertEquals("Cancelled before the player answered", SpotifyWebToken.harvest.value.detail)
+    }
+
+    @Test
+    fun `a failed renewal keeps the token that was working`() {
+        val working = jwt(3600)
+        SpotifyWebToken.harvester = RecordingHarvester(
+            SpotifyBrowserToken.Result.Failed("the player did not answer"),
+        )
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        credentials.cachedSpotifyToken = working
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 3_000_000
+
+        val status = runBlocking { SpotifyWebToken.renewNow(credentials) }
+        assertNull(status.token)
+        // Pressing a diagnostic button must not cost the working credential. The harvest does not
+        // read the cache, so clearing it first bought nothing and risked exactly this.
+        assertEquals(working, credentials.cachedSpotifyToken)
+        assertEquals(working, runBlocking { SpotifyWebToken.get(credentials) })
     }
 
     @Test
@@ -162,19 +226,43 @@ class SpotifyBrowserTokenTest {
     }
 
     @Test
-    fun `a refused request gets one more attempt, unlike a pasted token`() {
+    fun `a refused request starts a replacement, unlike a pasted token`() {
         val fresh = jwt(3600)
         val harvester = RecordingHarvester(
             SpotifyBrowserToken.Result.Harvested(fresh, SpotifyWebToken.expiryOf(fresh)),
         )
         SpotifyWebToken.harvester = harvester
+        SpotifyWebToken.externalScope = CoroutineScope(Dispatchers.Unconfined)
         val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
         credentials.cachedSpotifyToken = "a-token-spotify-just-refused"
         credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 600_000
 
-        // A harvested token can be replaced, which is the whole point of having a browser to ask.
-        assertEquals(fresh, runBlocking { SpotifyWebToken.refresh(credentials) })
+        // A harvested token can be replaced, which is the whole point of having a browser to ask —
+        // in the background, because this call is still inside a lookup's twelve seconds.
+        runBlocking { SpotifyWebToken.refresh(credentials) }
         assertEquals(1, harvester.calls)
+        assertEquals(fresh, credentials.cachedSpotifyToken)
+    }
+
+    @Test
+    fun `a rejected pasted token blames the paste, not the cookie`() {
+        // `get()` prefers a pasted token and `refresh()` will not replace one, so if Spotify refused
+        // anything it refused that. Blaming the cookie sent the user to replace a credential that
+        // was never used.
+        val credentials = FakeCredentials(
+            spDcCookie = "a-cookie",
+            spotifyWebToken = jwt(3600),
+            spotifyBrowserTokenEnabled = true,
+        )
+        val provider = SpotifyLyricsProvider(credentials)
+        provider.noteRejectedForTest()
+        assertTrue(provider.unavailableReason!!.contains("pasted access token"))
+
+        // With nothing pasted, the cookie behind the harvest is the right thing to point at.
+        val cookieOnly = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        val harvesting = SpotifyLyricsProvider(cookieOnly)
+        harvesting.noteRejectedForTest()
+        assertTrue(harvesting.unavailableReason!!.contains("sp_dc cookie"))
     }
 
     @Test

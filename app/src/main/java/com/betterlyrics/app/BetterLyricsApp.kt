@@ -127,6 +127,10 @@ class AppContainer(context: Context) {
         // The only place with both a Context and the settings. Installed unconditionally; whether it
         // ever runs is decided per call by `spotifyBrowserTokenEnabled`.
         SpotifyWebToken.harvester = SpotifyBrowserToken(context)
+        // A harvest has to outlive the lookup that noticed it was needed: a lookup gets twelve
+        // seconds for every source together, and a browser loading the whole player needs longer
+        // than that by itself.
+        SpotifyWebToken.externalScope = scope
 
         // The whole app in one line: whatever the phone is playing decides what we look up.
         scope.launch {
