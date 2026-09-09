@@ -830,9 +830,11 @@ class LyricsRepository(
  *    file the user imported outranks every network source by definition.
  * 2. A provider missing its token is dropped rather than queried, so leaving one enabled
  *    while you go and find the token costs nothing.
- * 3. A cache server, when the developer options are on, either joins the front of the
- *    fan-out or replaces it entirely — see [CacheServerMode]. It goes first so that a
- *    hit is what the tie-break sees.
+ * 3. A cache server takes its place in the order like any other source, so it can be ranked and
+ *    switched off from the same list — it used to be prepended unconditionally, which made its
+ *    priority a hidden special case nobody could see or change. It still only counts when the
+ *    developer options are on and a URL is set, and [CacheServerMode.ONLY] still overrides
+ *    everything, because "ask only the server" is a different question from "ask it first".
  *
  * Free of the repository's state so it can be tested directly: which sources a given
  * settings object will actually hit is exactly the sort of thing that is easy to get
@@ -940,13 +942,14 @@ internal fun providersFor(
         return listOf(cacheServer)
     }
 
-    val ordinary = settings.providerOrder
+    return settings.providerOrder
         .filter { it in settings.enabledProviders && it != localProviderId }
-        .filter { it != CACHE_SERVER_ID }
+        // The cache server is ranked in the list like everything else, but it still only counts
+        // when the developer options are on and a URL is set — otherwise it is a row explaining
+        // something the user has not set up, not a source.
+        .filter { it != CACHE_SERVER_ID || cacheServer != null }
         .mapNotNull { id -> providers.firstOrNull { it.id == id } }
         .filter { it.isConfigured }
-
-    return listOfNotNull(cacheServer) + ordinary
 }
 
 private const val CACHE_SERVER_ID = "cacheserver"

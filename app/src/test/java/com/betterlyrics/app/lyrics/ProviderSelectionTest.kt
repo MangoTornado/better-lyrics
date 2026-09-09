@@ -62,36 +62,77 @@ class ProviderSelectionTest {
 
     @Test
     fun `the cache server does nothing until the developer options are on`() {
-        val settings = base.copy(cacheServerUrl = "https://lyrics.example")
+        // Ranked and enabled, but the developer switch is off: it is a row explaining something the
+        // user has not set up, not a source.
+        val settings = base.copy(
+            cacheServerUrl = "https://lyrics.example",
+            providerOrder = listOf("local", "cacheserver", "netease", "lrclib"),
+            enabledProviders = base.enabledProviders + "cacheserver",
+        )
         assertEquals(listOf("netease", "lrclib"), select(settings))
     }
 
     @Test
     fun `the cache server does nothing without a URL`() {
-        val settings = base.copy(developerMode = true, cacheServerUrl = null)
+        val settings = base.copy(
+            developerMode = true,
+            cacheServerUrl = null,
+            providerOrder = listOf("local", "cacheserver", "netease", "lrclib"),
+            enabledProviders = base.enabledProviders + "cacheserver",
+        )
         assertEquals(listOf("netease", "lrclib"), select(settings))
     }
 
     @Test
-    fun `in parallel it goes first and the others still follow`() {
-        // First because a tie should be won by the answer that cost nobody a request; the
-        // others follow so a gap in the server costs nothing while it is being built.
+    fun `in parallel it is ranked like any other source`() {
+        // It used to be prepended unconditionally, which made its priority a special case nobody
+        // could see or change. It sits in the order now, first by default because an answer already
+        // held cost nobody a request — but that is a default, not a rule.
         val settings = base.copy(
             developerMode = true,
             cacheServerUrl = "https://lyrics.example",
             cacheServerMode = CacheServerMode.PARALLEL,
+            providerOrder = listOf("local", "cacheserver", "netease", "lrclib"),
+            enabledProviders = base.enabledProviders + "cacheserver",
         )
         assertEquals(listOf("cacheserver", "netease", "lrclib"), select(settings))
     }
 
     @Test
-    fun `only means only`() {
-        // The point of the mode: if nothing else can answer, what the server is missing
-        // becomes visible instead of being papered over.
+    fun `it can be ranked below the others`() {
+        // The point of putting it in the list: somebody who would rather ask the real sources first
+        // and fall back to their cache can say so.
+        val settings = base.copy(
+            developerMode = true,
+            cacheServerUrl = "https://lyrics.example",
+            providerOrder = listOf("local", "netease", "lrclib", "cacheserver"),
+            enabledProviders = base.enabledProviders + "cacheserver",
+        )
+        assertEquals(listOf("netease", "lrclib", "cacheserver"), select(settings))
+    }
+
+    @Test
+    fun `it can be switched off from the list like anything else`() {
+        val settings = base.copy(
+            developerMode = true,
+            cacheServerUrl = "https://lyrics.example",
+            providerOrder = listOf("local", "cacheserver", "netease", "lrclib"),
+            // Present in the order, absent from the enabled set.
+            enabledProviders = base.enabledProviders,
+        )
+        assertEquals(listOf("netease", "lrclib"), select(settings))
+    }
+
+    @Test
+    fun `only means only, whatever the ranking says`() {
+        // Which is why the ranking stops mattering in this mode: nothing else is asked, so there is
+        // nothing for an order to order. Ranked last here to prove it.
         val settings = base.copy(
             developerMode = true,
             cacheServerUrl = "https://lyrics.example",
             cacheServerMode = CacheServerMode.ONLY,
+            providerOrder = listOf("local", "netease", "lrclib", "cacheserver"),
+            enabledProviders = base.enabledProviders + "cacheserver",
         )
         assertEquals(listOf("cacheserver"), select(settings))
     }

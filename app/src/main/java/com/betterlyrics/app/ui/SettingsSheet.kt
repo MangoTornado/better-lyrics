@@ -108,6 +108,12 @@ private val PROVIDER_INFO = mapOf(
         "Your own files",
         "Imported .lrc / .ttml. Always tried first and always wins.",
     ),
+    "cacheserver" to ProviderInfo(
+        "Cache server",
+        "Your own server, holding what it has already fetched. Ranked first by default, because " +
+            "an answer it already has cost nobody a request.",
+        needs = "Needs a URL under Developer",
+    ),
     "applemusic" to ProviderInfo(
         "Apple Music",
         "Word-by-word, with official romanizations and translations. The best data there is.",
@@ -744,7 +750,13 @@ fun SettingsSheet(
                         "cached for 30 days, so each source is asked at most once per track.",
                 )
 
-                settings.providerOrder.forEachIndexed { index, id ->
+                // The cache server only appears once the developer options are on. Everyone else
+                // would see a row for something they have never heard of and cannot use, and its
+                // ranking would mean nothing.
+                val listed = settings.providerOrder.filter {
+                    it != "cacheserver" || settings.developerMode
+                }
+                listed.forEachIndexed { index, id ->
                     val info = PROVIDER_INFO[id] ?: ProviderInfo(id, "")
                     val provider = container.providers.firstOrNull { it.id == id }
                     val configured = provider?.isConfigured ?: true
@@ -754,14 +766,23 @@ fun SettingsSheet(
                         warn = !configured,
                         enabled = id in settings.enabledProviders,
                         canMoveUp = index > 0,
-                        canMoveDown = index < settings.providerOrder.lastIndex,
+                        canMoveDown = index < listed.lastIndex,
                         accent = accent,
                         onToggle = { store.setProviderEnabled(id, it) },
+                        // Swapped with the neighbouring *visible* row, resolved back to its real
+                        // position. The list shown is not always the list stored — a hidden cache
+                        // server sits in the order without a row — so moving by the visible index
+                        // would reorder the wrong pair, and stepping over the hidden entry is the
+                        // behaviour the arrow appears to promise anyway.
                         onMoveUp = {
-                            store.setProviderOrder(settings.providerOrder.swapped(index, index - 1))
+                            store.setProviderOrder(
+                                settings.providerOrder.swappedIds(id, listed.getOrNull(index - 1)),
+                            )
                         },
                         onMoveDown = {
-                            store.setProviderOrder(settings.providerOrder.swapped(index, index + 1))
+                            store.setProviderOrder(
+                                settings.providerOrder.swappedIds(id, listed.getOrNull(index + 1)),
+                            )
                         },
                     )
                 }
@@ -1330,12 +1351,14 @@ fun SettingsSheet(
                     Hint(
                         when (settings.cacheServerMode) {
                             CacheServerMode.PARALLEL ->
-                                "Asked first, alongside every source you have enabled. The best " +
-                                    "answer still wins, so the app keeps working whatever the " +
-                                    "server does — and the server sees every track you play."
+                                "Asked alongside every source you have enabled, and ranked among " +
+                                    "them in Where lyrics come from. The best answer still wins, " +
+                                    "so the app keeps working whatever the server does — and the " +
+                                    "server sees every track you play."
                             CacheServerMode.ONLY ->
-                                "The only source asked. Nothing falls back, so a track with no " +
-                                    "lyrics means the server could not answer it."
+                                "The only source asked, whatever its ranking says — there is " +
+                                    "nothing else to rank it against. Nothing falls back, so a " +
+                                    "track with no lyrics means the server could not answer it."
                         },
                     )
                     Help(
@@ -1614,6 +1637,20 @@ private fun Credit(title: String, body: String, link: String?, accent: Color) {
             )
         }
     }
+}
+
+/**
+ * Swap two entries by name rather than by position.
+ *
+ * The rows on screen are a filtered view of the stored order, so a visible index is not a stored
+ * one. Naming both sides removes the chance of that mismatch entirely.
+ */
+private fun List<String>.swappedIds(a: String, b: String?): List<String> {
+    if (b == null) return this
+    val from = indexOf(a)
+    val to = indexOf(b)
+    if (from < 0 || to < 0) return this
+    return swapped(from, to)
 }
 
 private fun List<String>.swapped(a: Int, b: Int): List<String> {

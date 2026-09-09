@@ -100,6 +100,7 @@ class ProviderConfigurationTest {
         val credentials = FakeCredentials()
         val implemented = listOf(
             AppleMusicProvider(credentials).id,
+            CacheServerProvider(credentials).id,
             AmllTtmlProvider(credentials).id,
             SpotifyLyricsProvider(credentials).id,
             NeteaseProvider(credentials).id,

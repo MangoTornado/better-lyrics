@@ -324,7 +324,8 @@ data class Settings(
             // certainty. Apple and Spotify identify the recording — Spotify by the id the
             // media session handed us, which cannot be the wrong song — so they come before
             // the databases that have to guess from a title.
-            "local", "applemusic", "spotify", "amll", "netease", "musixmatch", "lrclib",
+            "local", "cacheserver", "applemusic", "spotify", "amll", "netease", "musixmatch",
+            "lrclib",
         )
 
         /**
@@ -341,7 +342,7 @@ data class Settings(
          * is a paid membership away.
          */
         val DEFAULT_ENABLED_PROVIDERS =
-            setOf("local", "spotify", "amll", "netease", "musixmatch", "lrclib")
+            setOf("local", "cacheserver", "spotify", "amll", "netease", "musixmatch", "lrclib")
 
         const val DEFAULT_LRCLIB_URL = "https://lrclib.net"
         const val DEFAULT_NETEASE_URL = "https://music.163.com"
@@ -453,9 +454,13 @@ class SettingsStore(context: Context) : ProviderCredentials {
         providerOrder = prefs.getString(KEY_PROVIDER_ORDER, null)
             ?.split(',')?.filter { it.isNotBlank() }
             ?.let { stored ->
-                // Keep any provider added in a later version, even if the stored order
-                // predates it.
-                stored + Settings.DEFAULT_PROVIDER_ORDER.filterNot { it in stored }
+                // Keep any provider added in a later version, even if the stored order predates it.
+                // Appended at the end, because a source nobody has ranked should not outrank the
+                // ones they have — except the cache server, whose whole purpose is to answer before
+                // anything goes to the network. Last would make it pointless.
+                val added = Settings.DEFAULT_PROVIDER_ORDER.filterNot { it in stored }
+                val front = added.filter { it == "cacheserver" }
+                front + stored + added.filterNot { it == "cacheserver" }
             }
             ?: Settings.DEFAULT_PROVIDER_ORDER,
 
