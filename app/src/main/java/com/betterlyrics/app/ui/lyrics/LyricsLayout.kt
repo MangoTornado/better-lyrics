@@ -415,8 +415,50 @@ object LyricsLayoutBuilder {
             }
         }
 
+        // A word wider than the screen has to be broken somewhere, and syllables are the place.
+        //
+        // This is not a rare case. `partOfWord` is derived from the absence of a space, and Chinese
+        // is written without spaces — so an entire Chinese line arrives as one word. In the original
+        // characters that usually fits; romanized it is around three times wider, and the row loop
+        // below places a too-wide word anyway rather than breaking it, so the line ran off the side
+        // of the screen.
+        //
+        // Splitting between syllables rather than between characters keeps each piece's own timing
+        // window intact, so the karaoke fill still follows the singing across the break.
+        val layoutWords = ArrayList<List<DisplayPiece>>(displayWords.size)
+        for (word in displayWords) {
+            val width = word.sumOf { (paint.measureText(it.text) + it.leadingGap).toDouble() }
+            // A single piece has no interior boundary to break at: an RTL word is shaped as one run,
+            // and one very long syllable has nowhere to go. Both are left to overflow rather than
+            // broken somewhere that would look like a mistake.
+            if (width <= maxWidth || word.size < 2) {
+                layoutWords += word
+                continue
+            }
+
+            var chunk = mutableListOf<DisplayPiece>()
+            var chunkWidth = 0f
+            for (piece in word) {
+                val bare = paint.measureText(piece.text)
+                if (chunk.isNotEmpty() && chunkWidth + piece.leadingGap + bare > maxWidth) {
+                    layoutWords += chunk
+                    chunk = mutableListOf()
+                    chunkWidth = 0f
+                }
+                if (chunk.isEmpty()) {
+                    // A gap that sat between two syllables must not indent the start of a row.
+                    chunk += DisplayPiece(piece.text, piece.startMs, piece.endMs, 0f, piece.ruby)
+                    chunkWidth = bare
+                } else {
+                    chunk += piece
+                    chunkWidth += piece.leadingGap + bare
+                }
+            }
+            if (chunk.isNotEmpty()) layoutWords += chunk
+        }
+
         // Measure, then greedily wrap by word.
-        val wordWidths = displayWords.map { pieces ->
+        val wordWidths = layoutWords.map { pieces ->
             pieces.sumOf { (paint.measureText(it.text) + it.leadingGap).toDouble() }.toFloat()
         }
 
@@ -451,7 +493,7 @@ object LyricsLayoutBuilder {
             val orderedRow = if (line.rtl) row.reversed() else row
             for (wordIndex in orderedRow) {
                 if (rowText.isNotEmpty()) rowText.append(' ')
-                for (piece in displayWords[wordIndex]) {
+                for (piece in layoutWords[wordIndex]) {
                     x += piece.leadingGap
                     if (piece.leadingGap > 0f && rowText.isNotEmpty()) rowText.append(' ')
                     val width = paint.measureText(piece.text)
