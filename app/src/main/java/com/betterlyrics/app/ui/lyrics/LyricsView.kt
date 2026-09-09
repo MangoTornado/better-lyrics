@@ -8,6 +8,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -146,13 +148,30 @@ fun LyricsView(
         }
 
         val frameNanos = remember { mutableLongStateOf(0L) }
+
+        // The frame loop must read the *current* playhead, and `positionMsProvider` is a new lambda
+        // every time playback changes — a new track, a play, a pause. Keyed only on the renderer,
+        // the loop captured the first one and held it forever, so on a track change it was asking
+        // the previous track where it had got to.
+        //
+        // That is invisible for a few seconds and then looks like a freeze: the stale lambda keeps
+        // extrapolating, so frames are requested and the new lyrics animate correctly, until the
+        // projection hits the old track's duration and `currentMs` clamps it. From then on the
+        // position never changes, nothing looks like movement, and the loop stops asking for frames
+        // — while the draw, which is recomposed and does have the fresh lambda, would have drawn the
+        // right thing if only it had been called. Touching the screen woke it and it jumped.
+        //
+        // `rememberUpdatedState` rather than adding a key: restarting the loop on every play/pause
+        // would also reset the idle timer, which is the thing the loop exists to get right.
+        val currentPosition by rememberUpdatedState(positionMsProvider)
+
         LaunchedEffect(renderer) {
             var lastPosition = Long.MIN_VALUE
             var restingSince = 0L
             while (true) {
                 var awake = false
                 withFrameNanos { nanos ->
-                    val position = positionMsProvider()
+                    val position = currentPosition()
                     val moved = position != lastPosition
                     if (moved) {
                         lastPosition = position
