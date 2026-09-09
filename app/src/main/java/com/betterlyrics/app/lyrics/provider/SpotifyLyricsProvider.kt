@@ -127,21 +127,38 @@ class SpotifyLyricsProvider(
             val document = colorLyrics(trackId, token, request)
             if (document != null) return@withContext document
 
-            // Only a refusal is worth retrying, and only asynchronously. The retry used to run for
-            // *any* empty answer and then report "Spotify refused the token" — so a track Spotify
-            // simply has no lyrics for came back blaming the credential, which is the one thing
-            // that was working. It could not have succeeded either way: a pasted token cannot be
-            // replaced, and a harvested one is replaced in the background, so nothing here can hand
-            // back a different token to try within this call.
-            if (tokenRejected) {
-                SpotifyWebToken.refresh(credentials)
+            // Only a token problem is worth retrying. The retry used to run for *any* empty answer
+            // and then report "Spotify refused the token" — so a track Spotify simply has no lyrics
+            // for came back blaming the credential, which is the one thing that was working.
+            //
+            // A 400 counts, and that is not obvious. A signed-out token is accepted as a credential —
+            // no 401 — and then refused the data, because the endpoint needs a user and there is
+            // none. Verified against the live endpoint. So both statuses mean "this token", not
+            // "this track", and the cached token has to go: nothing else invalidated it, so one
+            // signed-out token kept failing for the full hour of its nominal life while the cookie
+            // behind it was fine.
+            if (tokenRejected || lastStatus == 400) {
+                val refusedStatus = lastStatus
+                val replacement = SpotifyWebToken.replaceRefused(credentials, TOKEN_WAIT_MS)
+
+                // The retry the first lookup of a run needs: a harvest that lands inside the budget
+                // is worth using now rather than only on the next track.
+                if (replacement != null && replacement != token) {
+                    val second = colorLyrics(trackId, replacement, request)
+                    if (second != null) return@withContext second
+                }
+
                 noMatchReason = when {
                     !credentials.spotifyWebToken.isNullOrBlank() ->
-                        "Spotify refused the pasted token (HTTP ${lastStatus ?: "401"}) — it has expired"
+                        "Spotify refused the pasted token (HTTP ${refusedStatus ?: "401"}) — " +
+                            "it has expired"
+                    refusedStatus == 400 && credentials.spotifyBrowserTokenEnabled ->
+                        "Spotify would not use that token (400): it was not signed in. It has been " +
+                            "thrown away and a renewal is running, so try again shortly"
                     credentials.spotifyBrowserTokenEnabled ->
-                        "Spotify refused the token (HTTP ${lastStatus ?: "401"}) — a renewal is " +
+                        "Spotify refused the token (HTTP ${refusedStatus ?: "401"}) — a renewal is " +
                             "running, so try again shortly"
-                    else -> "Spotify refused the token (HTTP ${lastStatus ?: "401"})"
+                    else -> "Spotify refused the token (HTTP ${refusedStatus ?: "401"})"
                 }
                 return@withContext null
             }
@@ -149,16 +166,12 @@ class SpotifyLyricsProvider(
             // The token was accepted and the answer was still empty. Which is ordinary: Spotify has
             // no lyrics at all for a great many tracks. The status says which, so there is no need
             // to guess.
+            // 400 is not here: it is a token problem and is handled above, with a replacement and a
+            // retry, rather than reported as a bad request.
             noMatchReason = when (val status = lastStatus) {
                 null -> "Spotify did not answer"
                 404 -> "Spotify has no lyrics for this track (404)"
                 200 -> "Spotify answered with no usable lines"
-                // Verified against the live endpoint: a token from a signed-out player is a real,
-                // full-length token that is accepted as a credential — no 401 — but has no user
-                // attached, and this endpoint answers 400 to it. The same request with a signed-in
-                // token returned 200. So 400 is about who the token is, not what was asked.
-                400 -> "Spotify rejected the request (400) — the token is not signed in, so the " +
-                    "sp_dc cookie is not working"
                 else -> "Spotify answered HTTP $status"
             }
             null
@@ -230,5 +243,16 @@ class SpotifyLyricsProvider(
 
     private companion object {
         val WEB_UA = SpotifyWebToken.WEB_USER_AGENT
+
+        /**
+         * How long a refused lookup will wait for a replacement token before giving up.
+         *
+         * Eight seconds against `LyricsRepository`'s twelve-second budget per source, leaving room
+         * for the retry request itself — spend the whole budget waiting and the source test reports
+         * a timeout, which says less than the reason would have. A cold WebView often takes longer
+         * than this, so the wait is an opportunity, not a guarantee: when it misses, the harvest
+         * finishes in the background and the next track has a token.
+         */
+        const val TOKEN_WAIT_MS = 8_000L
     }
 }

@@ -33,6 +33,16 @@ import java.io.File
 class Updater(
     private val context: Context,
     private val settingsStore: SettingsStore,
+    /**
+     * How the newest release is looked up. A parameter only so a test can decide when the check
+     * reaches the network, which is the whole question the throttle answers.
+     */
+    private val fetchLatest: suspend () -> AvailableRelease? = { UpdateChecker.latest() },
+    /**
+     * Whether installing over this build would work — false for a debug build. Injectable because
+     * unit tests *are* the debug build, so the real value switches off the code under test.
+     */
+    private val updatableInPlace: Boolean = !BuildConfig.DEBUG,
 ) {
 
     sealed interface State {
@@ -56,6 +66,18 @@ class Updater(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /**
+     * Whether this run has already looked.
+     *
+     * The launch check used to be throttled by wall clock, which made it miss the case it exists
+     * for. Pressing "Check now" records the time too, so one manual check bought six hours of
+     * launches that did nothing — the app would only ever find a release when asked, which is
+     * exactly backwards. The interval's real job is to stop repeat checks *inside* one run, so that
+     * is what it does now, and starting the app always looks.
+     */
+    @Volatile
+    private var checkedThisLaunch = false
+
     val currentVersion: String get() = BuildConfig.VERSION_NAME
     val currentVersionCode: Int get() = BuildConfig.VERSION_CODE
 
@@ -65,7 +87,7 @@ class Updater(
      * False for a debug build, which has a different application id and would be joined by
      * the release rather than replaced by it.
      */
-    val canUpdateInPlace: Boolean get() = !BuildConfig.DEBUG
+    val canUpdateInPlace: Boolean get() = updatableInPlace
 
     /**
      * Look for a newer release.
@@ -78,13 +100,18 @@ class Updater(
         val settings = settingsStore.current
         if (automatic) {
             if (!settings.autoUpdateCheck || !canUpdateInPlace) return
-            val since = System.currentTimeMillis() - settings.lastUpdateCheckAt
-            if (since in 0 until CHECK_INTERVAL_MS) return
+            // The first look of each run always happens; the interval only holds off the repeats,
+            // which come from the player screen being composed again rather than from a launch.
+            if (checkedThisLaunch) {
+                val since = System.currentTimeMillis() - settings.lastUpdateCheckAt
+                if (since in 0 until CHECK_INTERVAL_MS) return
+            }
         }
         if (_state.value is State.Downloading) return
 
+        checkedThisLaunch = true
         _state.value = State.Checking
-        val release = runCatching { UpdateChecker.latest() }
+        val release = runCatching { fetchLatest() }
             .onFailure { Log.w(TAG, "update check failed: ${it.message}") }
             .getOrNull()
 
@@ -207,7 +234,13 @@ class Updater(
         const val TAG = "Updater"
         const val DIRECTORY = "updates"
 
-        /** Six hours. Often enough to notice a release, rare enough to be free. */
+        /**
+         * Six hours, between repeat checks within one run.
+         *
+         * Not a floor on launches: see [checkedThisLaunch]. One unauthenticated GET against the
+         * releases API is cheap and GitHub allows sixty an hour per address, so looking once when
+         * the app starts costs nothing worth saving.
+         */
         const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
     }
 }

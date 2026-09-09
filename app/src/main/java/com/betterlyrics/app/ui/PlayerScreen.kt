@@ -61,7 +61,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.betterlyrics.app.AppContainer
 import com.betterlyrics.app.BuildConfig
 import com.betterlyrics.app.lyrics.LyricsState
@@ -126,10 +129,20 @@ fun PlayerScreen(
     var selectionMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(emptySet<Int>()) }
 
-    // Ask about updates once the screen is up. Respects the setting and its own interval,
-    // and says nothing at all when there is nothing to say.
+    // Ask about updates once the screen is up. Respects the setting, and says nothing at all when
+    // there is nothing to say.
+    //
+    // On every resume rather than once per composition: a media app is left running for days, so
+    // "on launch" alone means a process that never dies never looks again. The first look of a run
+    // always goes out and the rest are held off by the updater's interval, so coming back to the app
+    // after a while checks, and flicking away and back does not.
     val updateState by container.updater.state.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { container.updater.check(automatic = true) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(Unit) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            container.updater.check(automatic = true)
+        }
+    }
 
     // A floating window is the size of a postage stamp; whatever was covering the lyrics
     // has to get out of the way, or shrinking the app hands the user a miniature settings

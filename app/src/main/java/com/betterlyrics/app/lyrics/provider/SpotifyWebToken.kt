@@ -5,7 +5,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -115,6 +117,70 @@ object SpotifyWebToken {
             } finally {
                 inFlight.set(false)
             }
+        }
+    }
+
+    /**
+     * Gets a token before anything asks for one.
+     *
+     * Called once at startup. Without it the first lookup of every run is the thing that discovers
+     * there is no token, reports so, and gets a token only in time for the *next* one — so the first
+     * source test after launch always failed and running it again worked. Renewal was doing its job;
+     * it was just always one lookup late.
+     *
+     * Cheap when there is nothing to do: a valid cached token or a pasted one and this returns
+     * without starting anything.
+     */
+    fun warmUp(credentials: ProviderCredentials) {
+        if (pasted(credentials) != null) return
+        val cached = credentials.cachedSpotifyToken
+        if (!cached.isNullOrBlank() &&
+            credentials.cachedSpotifyTokenExpiresAt > System.currentTimeMillis() + 60_000
+        ) {
+            return
+        }
+        startHarvest(credentials)
+    }
+
+    /**
+     * Throws away a token that has just been refused and waits [timeoutMs] for its replacement.
+     *
+     * Only for a token the service has actually rejected — a 401, or the 400 that a signed-out
+     * token gets. Unlike [renewNow] this *does* clear the cache, and the difference matters: a
+     * renewal that times out must not discard a token that still works, but one the service just
+     * refused is worthless and handing it back for the next hour of its nominal life is how a single
+     * bad token kept failing long after the cookie behind it was fixed.
+     *
+     * Bounded because the caller is inside a lookup's budget. A cold WebView does not always fit, so
+     * this is an opportunity rather than a guarantee: it returns null and the harvest carries on in
+     * the background for the next track.
+     */
+    suspend fun replaceRefused(credentials: ProviderCredentials, timeoutMs: Long): String? {
+        // A pasted token is whatever the user copied; nothing here can produce a different one.
+        if (pasted(credentials) != null) return null
+
+        credentials.cachedSpotifyToken = null
+        credentials.cachedSpotifyTokenExpiresAt = 0L
+        return awaitFresh(credentials, timeoutMs)
+    }
+
+    /**
+     * Starts a harvest if one can run and waits for it to settle.
+     *
+     * The wait is for a status that both differs from the one already showing and is no longer
+     * running: the flow keeps the last result, so matching on content alone returns a previous
+     * failure instantly.
+     */
+    private suspend fun awaitFresh(credentials: ProviderCredentials, timeoutMs: Long): String? {
+        if (harvester == null) return null
+        if (!credentials.spotifyBrowserTokenEnabled) return null
+        if (credentials.spDcCookie.isNullOrBlank()) return null
+
+        val before = _harvest.value
+        startHarvest(credentials)
+
+        return withTimeoutOrNull(timeoutMs) {
+            harvest.first { it !== before && !it.running }.token
         }
     }
 

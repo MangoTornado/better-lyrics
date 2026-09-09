@@ -132,6 +132,12 @@ class AppContainer(context: Context) {
         // than that by itself.
         SpotifyWebToken.externalScope = scope
 
+        // Get the token now rather than letting the first lookup discover it is missing. That lookup
+        // could only report the fact and start a harvest for the *next* one, which is why the first
+        // source test after a launch failed and a second one worked. Does nothing when a valid token
+        // is already cached, or when the feature is off.
+        SpotifyWebToken.warmUp(settings)
+
         // The whole app in one line: whatever the phone is playing decides what we look up.
         scope.launch {
             media.snapshot

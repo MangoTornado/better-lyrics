@@ -237,10 +237,57 @@ class NoMatchReasonTest {
 
             val reason = provider.noMatchReason!!
             assertTrue(reason, reason.contains("not signed in"))
-            assertTrue(reason, reason.contains("sp_dc"))
             // Not blamed on the track, which is what a bare "400" invited.
             assertFalse(reason, reason.contains("no lyrics"))
+
+            // And the token is gone. Nothing else invalidated it, so one signed-out token kept
+            // failing for the full hour of its nominal life — which is what "it works if I run the
+            // test again later" was.
+            assertNull("a refused token must not be kept", credentials.cachedSpotifyToken)
         } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `a refused token is replaced and the lookup retried once`() = runBlocking {
+        // What "the first test after launch fails and the second one works" should have been. The
+        // token that gets refused is replaced and the same lookup asks again, so the answer arrives
+        // on the attempt the user is actually watching.
+        val lyrics = """
+            {"lyrics":{"syncType":"LINE_SYNCED","providerDisplayName":"Musixmatch",
+             "lines":[{"startTimeMs":"1000","words":"Yeah","endTimeMs":"0"},
+                      {"startTimeMs":"2000","words":"I said ooh","endTimeMs":"0"}]}}
+        """.trimIndent()
+        val server = FakeHttp(listOf(400 to "", 200 to lyrics))
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        credentials.cachedSpotifyToken = "stale".repeat(30)
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 3_000_000
+
+        val fresh = "fresh".repeat(30)
+        val previousHarvester = SpotifyWebToken.harvester
+        val previousScope = SpotifyWebToken.externalScope
+        SpotifyWebToken.harvester = object : SpotifyBrowserToken(
+            androidx.test.core.app.ApplicationProvider.getApplicationContext(),
+        ) {
+            override suspend fun harvest(spDcCookie: String, timeoutMs: Long) =
+                SpotifyBrowserToken.Result.Harvested(fresh, System.currentTimeMillis() + 3_000_000)
+        }
+        SpotifyWebToken.externalScope =
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+
+        try {
+            val provider = SpotifyLyricsProvider(credentials, lyricsBase = server.url)
+            val document = provider.fetch(lemon.copy(spotifyTrackId = "7Cd17G3oNQ34OWUwS8ZxfR"))
+
+            assertNotNull("the retry should have produced lyrics", document)
+            assertEquals(2, document!!.lines.size)
+            assertEquals("both attempts should have been made", 2, server.requests)
+            assertEquals("the fresh token should be cached", fresh, credentials.cachedSpotifyToken)
+            assertNull("a successful lookup has no reason to give", provider.noMatchReason)
+        } finally {
+            SpotifyWebToken.harvester = previousHarvester
+            SpotifyWebToken.externalScope = previousScope
             server.close()
         }
     }
@@ -258,21 +305,35 @@ class NoMatchReasonTest {
         fun close() = delegate.close()
     }
 
-    /** Answers every connection with one canned status and body. */
-    private class FakeHttp(status: Int, body: String) {
+    /**
+     * Answers connections with canned statuses and bodies.
+     *
+     * A list rather than one reply, because the retry after a refused token can only be observed by
+     * answering the second request differently from the first. The last entry repeats, so a single
+     * reply still means "always this".
+     */
+    private class FakeHttp(private val replies: List<Pair<Int, String>>) {
+        constructor(status: Int, body: String) : this(listOf(status to body))
+
         private val socket = java.net.ServerSocket(0, 8, java.net.InetAddress.getLoopbackAddress())
         private val thread: Thread
+        private val served = java.util.concurrent.atomic.AtomicInteger(0)
 
         val url: String = "http://127.0.0.1:${socket.localPort}"
 
+        /** How many requests arrived, so a test can tell a retry from a single attempt. */
+        val requests: Int get() = served.get()
+
         init {
-            val payload = body.toByteArray()
-            val response = buildString {
-                append("HTTP/1.1 $status ${if (status == 200) "OK" else "Error"}\r\n")
-                append("Content-Type: application/json\r\n")
-                append("Content-Length: ${payload.size}\r\n")
-                append("Connection: close\r\n\r\n")
-            }.toByteArray() + payload
+            val encoded = replies.map { (status, body) ->
+                val payload = body.toByteArray()
+                buildString {
+                    append("HTTP/1.1 $status ${if (status == 200) "OK" else "Error"}\r\n")
+                    append("Content-Type: application/json\r\n")
+                    append("Content-Length: ${payload.size}\r\n")
+                    append("Connection: close\r\n\r\n")
+                }.toByteArray() + payload
+            }
 
             thread = Thread {
                 while (!socket.isClosed) {
@@ -285,8 +346,9 @@ class NoMatchReasonTest {
                                 val line = input.readLine() ?: break
                                 if (line.isEmpty()) break
                             }
+                            val index = served.getAndIncrement()
                             client.getOutputStream().apply {
-                                write(response)
+                                write(encoded[minOf(index, encoded.lastIndex)])
                                 flush()
                             }
                         }
