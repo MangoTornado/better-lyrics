@@ -4,6 +4,7 @@ import com.betterlyrics.app.settings.Settings
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -157,6 +158,69 @@ class NoMatchReasonTest {
         }
     }
 
+    @Test
+    fun `a track Spotify has no lyrics for does not blame the token`() = runBlocking {
+        // The report that prompted this: "Spotify refused the token and there is no replacement
+        // yet", for a token that had just been accepted. The retry ran for *any* empty answer, could
+        // never produce a different token, and overwrote the real reason with a complaint about the
+        // one thing that was working.
+        val server = FakeHttp(status = 404, body = """{"error":"not found"}""")
+        try {
+            val provider = SpotifyLyricsProvider(
+                FakeCredentials(spotifyWebToken = "x".repeat(120)),
+                lyricsBase = server.url,
+            )
+            assertNull(provider.fetch(lemon.copy(spotifyTrackId = "7Cd17G3oNQ34OWUwS8ZxfR")))
+
+            val reason = provider.noMatchReason!!
+            assertTrue(reason, reason.contains("no lyrics for this track"))
+            assertTrue(reason, reason.contains("404"))
+            // And nothing in it points at the credential.
+            assertFalse(reason, reason.contains("token"))
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `a refused token says so, and says a renewal is coming`() = runBlocking {
+        val server = FakeHttp(status = 401, body = """{"error":"unauthorised"}""")
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        // A token has to exist for the request to be made at all.
+        credentials.cachedSpotifyToken = "x".repeat(120)
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 3_000_000
+        try {
+            val provider = SpotifyLyricsProvider(credentials, lyricsBase = server.url)
+            assertNull(provider.fetch(lemon.copy(spotifyTrackId = "7Cd17G3oNQ34OWUwS8ZxfR")))
+
+            val reason = provider.noMatchReason!!
+            assertTrue(reason, reason.contains("refused the token"))
+            assertTrue(reason, reason.contains("401"))
+            // Renewal is on, so the next step is waiting rather than pasting.
+            assertTrue(reason, reason.contains("renewal is running"))
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `an unexpected status is named rather than guessed at`() = runBlocking {
+        // 400 rather than 502: `Http.get` throws for 429 and anything 5xx, treating them as "not
+        // now" rather than "not here", so those never reach this path at all — the source test
+        // prints the exception instead. What lands here is 2xx, 401, 403, 404 and the odd 4xx.
+        val server = FakeHttp(status = 400, body = "bad request")
+        try {
+            val provider = SpotifyLyricsProvider(
+                FakeCredentials(spotifyWebToken = "x".repeat(120)),
+                lyricsBase = server.url,
+            )
+            assertNull(provider.fetch(lemon.copy(spotifyTrackId = "7Cd17G3oNQ34OWUwS8ZxfR")))
+            assertEquals("Spotify answered HTTP 400", provider.noMatchReason)
+        } finally {
+            server.close()
+        }
+    }
+
     /**
      * A stand-in for NetEase's search endpoint.
      *
@@ -165,6 +229,13 @@ class NoMatchReasonTest {
      * answers every connection with the same body, because the provider tries several queries.
      */
     private class FakeNetease(body: String) {
+        private val delegate = FakeHttp(200, body)
+        val url: String get() = delegate.url
+        fun close() = delegate.close()
+    }
+
+    /** Answers every connection with one canned status and body. */
+    private class FakeHttp(status: Int, body: String) {
         private val socket = java.net.ServerSocket(0, 8, java.net.InetAddress.getLoopbackAddress())
         private val thread: Thread
 
@@ -173,7 +244,7 @@ class NoMatchReasonTest {
         init {
             val payload = body.toByteArray()
             val response = buildString {
-                append("HTTP/1.1 200 OK\r\n")
+                append("HTTP/1.1 $status ${if (status == 200) "OK" else "Error"}\r\n")
                 append("Content-Type: application/json\r\n")
                 append("Content-Length: ${payload.size}\r\n")
                 append("Connection: close\r\n\r\n")

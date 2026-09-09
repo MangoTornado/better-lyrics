@@ -26,7 +26,15 @@ import kotlinx.serialization.json.longOrNull
  * rather than `403`. So a token pasted into the developer options works, for the hour or so
  * until it expires. Without one the provider stays dormant and says why.
  */
-class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : LyricsProvider {
+class SpotifyLyricsProvider(
+    private val credentials: ProviderCredentials,
+    /**
+     * Where `color-lyrics` lives. A parameter only so a test can stand a server in its place — the
+     * status this endpoint returns is the difference between "your token is bad" and "this song has
+     * no lyrics", and that was worth being able to test rather than reason about.
+     */
+    private val lyricsBase: String = "https://spclient.wg.spotify.com",
+) : LyricsProvider {
 
     override val id = "spotify"
     override val displayName = "Spotify"
@@ -79,9 +87,20 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
     override var noMatchReason: String? = null
         private set
 
+    /**
+     * The status of the last lyrics request.
+     *
+     * Kept because it is the difference between "your credential is bad" and "this song has no
+     * lyrics", and those were reported identically. A 404 here is the ordinary case — Spotify has
+     * lyrics for a fraction of its catalogue.
+     */
+    @Volatile
+    private var lastStatus: Int? = null
+
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
             noMatchReason = null
+            lastStatus = null
 
             val trackId = request.spotifyTrackId
             if (trackId == null) {
@@ -105,26 +124,38 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
                 return@withContext null
             }
 
-            var document = colorLyrics(trackId, token, request)
-            if (document == null && !tokenRejected) {
-                // Force a token refresh once before giving up. A pasted token cannot be
-                // refreshed, so this only helps the minted path.
-                token = SpotifyWebToken.refresh(credentials)
-                if (token == null) {
-                    noMatchReason = "Spotify refused the token and there is no replacement yet"
-                    return@withContext null
+            val document = colorLyrics(trackId, token, request)
+            if (document != null) return@withContext document
+
+            // Only a refusal is worth retrying, and only asynchronously. The retry used to run for
+            // *any* empty answer and then report "Spotify refused the token" — so a track Spotify
+            // simply has no lyrics for came back blaming the credential, which is the one thing
+            // that was working. It could not have succeeded either way: a pasted token cannot be
+            // replaced, and a harvested one is replaced in the background, so nothing here can hand
+            // back a different token to try within this call.
+            if (tokenRejected) {
+                SpotifyWebToken.refresh(credentials)
+                noMatchReason = when {
+                    !credentials.spotifyWebToken.isNullOrBlank() ->
+                        "Spotify refused the pasted token (HTTP ${lastStatus ?: "401"}) — it has expired"
+                    credentials.spotifyBrowserTokenEnabled ->
+                        "Spotify refused the token (HTTP ${lastStatus ?: "401"}) — a renewal is " +
+                            "running, so try again shortly"
+                    else -> "Spotify refused the token (HTTP ${lastStatus ?: "401"})"
                 }
-                document = colorLyrics(trackId, token, request)
+                return@withContext null
             }
 
-            if (document == null) {
-                noMatchReason = if (tokenRejected) {
-                    "Spotify refused the token — it has expired"
-                } else {
-                    "Spotify has no lyrics for this track"
-                }
+            // The token was accepted and the answer was still empty. Which is ordinary: Spotify has
+            // no lyrics at all for a great many tracks. The status says which, so there is no need
+            // to guess.
+            noMatchReason = when (val status = lastStatus) {
+                null -> "Spotify did not answer"
+                404 -> "Spotify has no lyrics for this track (404)"
+                200 -> "Spotify answered with no usable lines"
+                else -> "Spotify answered HTTP $status"
             }
-            document
+            null
         }
 
     private suspend fun colorLyrics(
@@ -132,7 +163,7 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
         token: String,
         request: LyricsRequest,
     ): LyricsDocument? {
-        val url = "https://spclient.wg.spotify.com/color-lyrics/v2/track/$trackId" +
+        val url = "$lyricsBase/color-lyrics/v2/track/$trackId" +
             "?format=json&vocalRemoval=false&market=from_token"
         // Tested against the live endpoint with a token copied from the player: these four
         // headers are enough. The `client-token` the web player also sends is not required.
@@ -144,6 +175,7 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
         )
 
         return Http.get(url, headers, onStatus = { code ->
+            lastStatus = code
             tokenRejected = code == 401 || code == 403
         }) { body ->
             runCatching {
