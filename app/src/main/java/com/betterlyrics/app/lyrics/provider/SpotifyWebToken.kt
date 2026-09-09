@@ -2,10 +2,13 @@ package com.betterlyrics.app.lyrics.provider
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
@@ -140,6 +143,66 @@ object SpotifyWebToken {
             return
         }
         startHarvest(credentials)
+    }
+
+    /**
+     * Keeps a token in hand for as long as the process lives.
+     *
+     * Renews [RENEW_MARGIN_MS] before the stated expiry rather than waiting for a lookup to discover
+     * the token is dead. Harvesting takes the best part of a minute, so discovering it at the moment
+     * of use is always too late — the lookup that notices is the lookup that fails.
+     *
+     * Sleeps in bounded steps rather than one long one so that turning the switch off, or pasting a
+     * token, is noticed within a few minutes instead of at the end of a half-hour nap. Backs off
+     * after a failure, because the alternative when a cookie has expired is a WebView every time
+     * round the loop, forever.
+     */
+    fun keepFresh(credentials: ProviderCredentials) {
+        val scope = externalScope ?: return
+        synchronized(this) {
+            if (keeper?.isActive == true) return
+            keeper = scope.launch {
+                while (isActive) {
+                    // Re-read every pass: all three can change while this is asleep.
+                    val usable = credentials.spotifyBrowserTokenEnabled &&
+                        !credentials.spDcCookie.isNullOrBlank() &&
+                        pasted(credentials) == null
+                    if (!usable) {
+                        delay(IDLE_POLL_MS)
+                        continue
+                    }
+
+                    val due = credentials.cachedSpotifyTokenExpiresAt - RENEW_MARGIN_MS
+                    val wait = due - System.currentTimeMillis()
+                    if (wait > 0) {
+                        delay(minOf(wait, IDLE_POLL_MS))
+                        continue
+                    }
+
+                    if (awaitFresh(credentials, KEEPER_HARVEST_MS) == null) {
+                        delay(RETRY_AFTER_FAILURE_MS)
+                    }
+                }
+            }
+        }
+    }
+
+    @Volatile
+    private var keeper: Job? = null
+
+    /**
+     * Drops the transient state a test would otherwise inherit.
+     *
+     * This is an object, so the single-flight flag, the keeper job and the last status outlive any
+     * one test. A keeper left running from an earlier test makes [keepFresh] a no-op in the next one,
+     * and a stuck single-flight flag makes every harvest a no-op — both of which look like the code
+     * under test deciding not to act.
+     */
+    internal fun resetForTest() {
+        keeper?.cancel()
+        keeper = null
+        inFlight.set(false)
+        _harvest.value = HarvestStatus()
     }
 
     /**
@@ -315,6 +378,24 @@ object SpotifyWebToken {
      * expiry.
      */
     private const val FALLBACK_LIFETIME_MS = 20 * 60_000L
+
+    /**
+     * How far ahead of expiry [keepFresh] renews.
+     *
+     * Five minutes, which comfortably covers a harvest that has to load the whole player. Renewing
+     * at the moment of expiry would mean every lookup in the harvest's window using a dead token,
+     * which is the failure this exists to prevent.
+     */
+    private const val RENEW_MARGIN_MS = 5 * 60_000L
+
+    /** How long the keeper allows a harvest, unlike a lookup it is not inside anyone's budget. */
+    private const val KEEPER_HARVEST_MS = 60_000L
+
+    /** Longest the keeper sleeps in one go, so a settings change is noticed reasonably soon. */
+    private const val IDLE_POLL_MS = 5 * 60_000L
+
+    /** After a failed harvest — an expired cookie must not mean a WebView every second. */
+    private const val RETRY_AFTER_FAILURE_MS = 5 * 60_000L
 
     /**
      * When a token expires, from its own `exp` claim, or null if it does not say.

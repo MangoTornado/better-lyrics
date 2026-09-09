@@ -2,6 +2,7 @@ package com.betterlyrics.app.lyrics.provider
 
 import com.betterlyrics.app.settings.Settings
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,6 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.robolectric.RobolectricTestRunner
@@ -63,8 +65,18 @@ class SpotifyBrowserTokenTest {
         }
     }
 
+    @Before
+    fun setUp() {
+        // Robolectric brings up the real Application, so `AppContainer` has already installed a
+        // keeper — with the app's own (empty) settings. This is a singleton, so that keeper makes
+        // every `keepFresh` here a no-op, and the tests read as "it decided not to renew".
+        SpotifyWebToken.resetForTest()
+    }
+
     @After
     fun tearDown() {
+        // Before the fields it depends on go away, or a keeper still looping reads a null harvester.
+        SpotifyWebToken.resetForTest()
         SpotifyWebToken.harvester = null
         SpotifyWebToken.externalScope = null
     }
@@ -168,6 +180,72 @@ class SpotifyBrowserTokenTest {
         val minutes = (credentials.cachedSpotifyTokenExpiresAt - before) / 60_000
         // Under the 29 a live token had. Guessing long is what let a dead token look fresh.
         assertTrue("guessed $minutes minutes", minutes in 15..25)
+    }
+
+    /**
+     * Runs [body] with a keeper scope, cancelled afterwards whatever happens.
+     *
+     * `Unconfined` so the keeper runs on this thread as far as its first real suspension — the
+     * `delay` it reaches once it has decided what to do. That turns "did it renew?" into a plain
+     * assertion instead of a race against a thread pool.
+     */
+    private fun withKeeperScope(body: () -> Unit) {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        SpotifyWebToken.externalScope = scope
+        try {
+            body()
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a token near expiry is replaced before a lookup needs it`() = withKeeperScope {
+        val credentials = FakeCredentials(spDcCookie = "cookie", spotifyBrowserTokenEnabled = true)
+        credentials.cachedSpotifyToken = "x".repeat(200)
+        // Inside the five-minute margin: still valid, but not for long enough to be worth keeping.
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 60_000
+        val fresh = "y".repeat(200)
+        val expiresAt = System.currentTimeMillis() + 30 * 60_000
+        val harvester = RecordingHarvester(SpotifyBrowserToken.Result.Harvested(fresh, expiresAt))
+        SpotifyWebToken.harvester = harvester
+
+        SpotifyWebToken.keepFresh(credentials)
+
+        // Renewed ahead of expiry rather than leaving a lookup to fail on a dead token.
+        assertEquals(1, harvester.calls)
+        assertEquals(fresh, credentials.cachedSpotifyToken)
+        assertEquals(expiresAt, credentials.cachedSpotifyTokenExpiresAt)
+    }
+
+    @Test
+    fun `a token with plenty of life left is left alone`() = withKeeperScope {
+        val credentials = FakeCredentials(spDcCookie = "cookie", spotifyBrowserTokenEnabled = true)
+        credentials.cachedSpotifyToken = "x".repeat(200)
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 30 * 60_000
+        val harvester = RecordingHarvester(SpotifyBrowserToken.Result.Failed("should not be asked"))
+        SpotifyWebToken.harvester = harvester
+
+        SpotifyWebToken.keepFresh(credentials)
+
+        // Renewing a token that has half an hour left is a WebView load for nothing.
+        assertEquals(0, harvester.calls)
+    }
+
+    @Test
+    fun `the keeper leaves a pasted token alone`() = withKeeperScope {
+        val credentials = FakeCredentials(
+            spDcCookie = "cookie",
+            spotifyWebToken = "p".repeat(200),
+            spotifyBrowserTokenEnabled = true,
+        )
+        val harvester = RecordingHarvester(SpotifyBrowserToken.Result.Failed("should not be asked"))
+        SpotifyWebToken.harvester = harvester
+
+        SpotifyWebToken.keepFresh(credentials)
+
+        // A pasted token is the user's choice; replacing it would undo what they asked for.
+        assertEquals(0, harvester.calls)
     }
 
     @Test

@@ -138,6 +138,11 @@ class AppContainer(context: Context) {
         // is already cached, or when the feature is off.
         SpotifyWebToken.warmUp(settings)
 
+        // And keep one from then on, renewed five minutes before it expires rather than when a
+        // lookup finds it dead. A harvest takes the best part of a minute, so noticing at the moment
+        // of use is always too late: the lookup that notices is the lookup that fails.
+        SpotifyWebToken.keepFresh(settings)
+
         // The whole app in one line: whatever the phone is playing decides what we look up.
         scope.launch {
             media.snapshot
