@@ -37,8 +37,16 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
             val songId = search(request) ?: return@withContext null
-            lyricsFor(songId, request)
+            val document = lyricsFor(songId, request)
+            if (document == null && noMatchReason == null) {
+                noMatchReason = "Matched the track, but NetEase has no lyrics stored for it"
+            }
+            document
         }
+
+    @Volatile
+    override var noMatchReason: String? = null
+        private set
 
     /** Returns the NetEase song id of the best match, or null. */
     private suspend fun search(request: LyricsRequest): Long? {
@@ -49,6 +57,13 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
                 add("${request.cleanTitle} ${request.primaryArtist}".trim())
             }
         }.distinct()
+
+        // Enough to tell three failures apart afterwards: nothing came back at all, results came
+        // back but none matched, or the endpoint answered with something unreadable.
+        var reachedEndpoint = false
+        var candidates = 0
+        var bestOverall = 0f
+        var bestTitle: String? = null
 
         for (query in queries) {
             // `/api/search/get`, not `/api/search/get/web`. The `/web` variant now answers
@@ -66,7 +81,10 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
                     Json.parseToJsonElement(body).jsonObject["result"]
                         ?.jsonObject?.get("songs")?.jsonArray
                 }.getOrNull()
-            } ?: continue
+            }
+            if (songs == null) continue
+            reachedEndpoint = true
+            candidates += songs.size
 
             var bestId: Long? = null
             var bestScore = 0f
@@ -86,8 +104,27 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
                     bestScore = score
                     bestId = id
                 }
+                if (score > bestOverall) {
+                    bestOverall = score
+                    bestTitle = if (artists.isEmpty()) name else "$name — ${artists.first()}"
+                }
             }
             if (bestId != null && bestScore >= Matching.MATCH_THRESHOLD) return bestId
+        }
+
+        // Which of these it is decides what to do about it, and they are not otherwise
+        // distinguishable from the outside.
+        noMatchReason = when {
+            // Not the same as unreachable: `Http.get` throws for that, and the source test prints
+            // the exception. This is the endpoint answering with a 404 or an empty body — which is
+            // also what the encrypted `/web` variant looks like from here.
+            !reachedEndpoint -> "NetEase answered with nothing readable"
+            candidates == 0 -> "NetEase has no results for this title"
+            else ->
+                "$candidates results, closest \"$bestTitle\" at " +
+                    "${(bestOverall * 100).toInt()}% — under the " +
+                    "${(Matching.MATCH_THRESHOLD * 100).toInt()}% needed to be sure it is the " +
+                    "same recording"
         }
         return null
     }

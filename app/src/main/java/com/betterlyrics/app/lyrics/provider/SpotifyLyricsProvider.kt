@@ -75,17 +75,54 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
         tokenRejected = true
     }
 
+    @Volatile
+    override var noMatchReason: String? = null
+        private set
+
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {
-            val trackId = request.spotifyTrackId ?: return@withContext null
+            noMatchReason = null
 
-            var token = SpotifyWebToken.get(credentials) ?: return@withContext null
+            val trackId = request.spotifyTrackId
+            if (trackId == null) {
+                // Not a failure, and not something a token would fix: this source is keyed by
+                // Spotify's own track id, and nothing else publishes one. Saying "no match" here
+                // reads as "Spotify does not have this song", which is a different claim entirely.
+                noMatchReason = "Not playing from Spotify, so there is no track id to look up"
+                return@withContext null
+            }
+
+            var token = SpotifyWebToken.get(credentials)
+            if (token == null) {
+                // With automatic renewal on, the source counts as configured before a token
+                // exists — so this is where "waiting for the first token" used to surface, as
+                // "No match".
+                noMatchReason = if (credentials.spotifyBrowserTokenEnabled) {
+                    "No token yet — a renewal is running in the background, so try again shortly"
+                } else {
+                    "No access token"
+                }
+                return@withContext null
+            }
+
             var document = colorLyrics(trackId, token, request)
             if (document == null && !tokenRejected) {
                 // Force a token refresh once before giving up. A pasted token cannot be
                 // refreshed, so this only helps the minted path.
-                token = SpotifyWebToken.refresh(credentials) ?: return@withContext null
+                token = SpotifyWebToken.refresh(credentials)
+                if (token == null) {
+                    noMatchReason = "Spotify refused the token and there is no replacement yet"
+                    return@withContext null
+                }
                 document = colorLyrics(trackId, token, request)
+            }
+
+            if (document == null) {
+                noMatchReason = if (tokenRejected) {
+                    "Spotify refused the token — it has expired"
+                } else {
+                    "Spotify has no lyrics for this track"
+                }
             }
             document
         }

@@ -113,6 +113,20 @@ interface LyricsProvider {
      */
     val unavailableReason: String? get() = null
 
+    /**
+     * Why the last [fetch] came back with nothing.
+     *
+     * `fetch` returns null for reasons that have nothing to do with each other — no id to search
+     * with, no token yet, a search that found nothing, candidates that all scored too low, an
+     * endpoint that answered with something unreadable. Reported as one bare "No match" those are
+     * indistinguishable, and the difference between them is the entire content of the answer to
+     * "why is this source not working".
+     *
+     * Set on the way out of `fetch`; read by the source test. Null means the source has nothing to
+     * add beyond "it found nothing".
+     */
+    val noMatchReason: String? get() = null
+
     /** Returns null when this provider simply has nothing for the track. */
     suspend fun fetch(request: LyricsRequest): LyricsDocument?
 }

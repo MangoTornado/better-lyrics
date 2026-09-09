@@ -334,7 +334,12 @@ class LyricsRepository(
                         val document = finished?.document
                         when {
                             finished == null -> "Timed out after ${PROVIDER_TIMEOUT_MS / 1000}s"
-                            document == null -> "No match (${took}ms)"
+                            document == null ->
+                                // The reason, when the source has one. "No match" alone conflates
+                                // "asked and it has nothing" with "never got as far as asking".
+                                provider.noMatchReason
+                                    ?.let { "$it (${took}ms)" }
+                                    ?: "No match (${took}ms)"
                             else -> "${document.lines.size} lines, " +
                                 "${document.kind.name.lowercase()}-synced (${took}ms)"
                         }
