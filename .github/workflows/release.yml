@@ -93,7 +93,7 @@ jobs:
           {
             printf '**Install:** download the APK below and open it. Android will ask you to allow installing from this source.\n\n'
             printf '**First run:** grant notification access when the app asks — that is how it sees what is playing. Everything else is optional; the welcome guide in the app explains which tokens add what.\n\n'
-            printf 'Signed with the project release key; `arm64-v8a` and `x86_64`, minSdk 29.\n'
+            printf 'Signed with the project release key; `arm64-v8a`, minSdk 29.\n'
           } > release-notes.md
 
       - name: Publish the release

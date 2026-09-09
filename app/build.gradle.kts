@@ -47,12 +47,6 @@ android {
         versionCode = (System.getenv("BL_VERSION_CODE")?.toIntOrNull()) ?: 1
         versionName = System.getenv("BL_VERSION_NAME") ?: "0.1.0"
 
-        // ML Kit's translation engine ships a ~16 MB native library per ABI. Keeping
-        // arm64 (every phone made in the last decade) and x86_64 (emulators) drops
-        // ~29 MB without losing a device anyone runs this on.
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
     }
 
     if (canSignRelease) {
@@ -72,6 +66,11 @@ android {
 
     buildTypes {
         release {
+            // ML Kit's translation engine ships a ~17 MB native library per ABI, and x86_64 exists
+            // for emulators. Nobody installs a release build on an emulator, so shipping it there
+            // was a third of the download for a case that never happens. Debug keeps both.
+            ndk { abiFilters += "arm64-v8a" }
+
             if (canSignRelease) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
@@ -81,6 +80,8 @@ android {
             )
         }
         debug {
+            // Both, so the app still runs on an emulator.
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
             applicationIdSuffix = ".debug"
         }
     }

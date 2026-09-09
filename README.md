@@ -267,11 +267,13 @@ adb shell "run-as com.betterlyrics.app.debug sh -c \
 
 Also worth knowing:
 
-- **The APK is large** (~51 MB release). Kuromoji's dictionary is 33 MB of it and ML Kit's
-  translation engine most of the rest. Both are the price of correct Japanese readings and
-  offline translation; both could become on-demand downloads later.
-- **Only `arm64-v8a` and `x86_64`** are packaged, which covers every phone made in the
-  last decade plus emulators.
+- **The APK is large** (~34 MB release). Kuromoji's dictionary and ML Kit's translation engine
+  are nearly all of it. Both are the price of correct Japanese readings and offline
+  translation; both could become on-demand downloads later.
+- **A release build packages `arm64-v8a` only**, which is every phone made in the last decade.
+  ML Kit ships a ~17 MB native library per architecture, so including x86_64 was a third of
+  the download for a case that never happens — nobody installs a release build on an emulator.
+  Debug builds keep both.
 - **Right-to-left lyrics** animate per word, not per syllable: splitting an Arabic or
   Hebrew run into syllables breaks the letter joins.
 - **Musixmatch, Spotify and Apple Music** are undocumented endpoints. They are treated as
