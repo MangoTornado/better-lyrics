@@ -33,14 +33,24 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
 
     override val isConfigured: Boolean
         get() = SpotifyWebToken.pasted(credentials) != null ||
+            // A cookie counts when a WebView can turn it into a token. Without this the feature was
+            // unreachable: removing the pasted token made the source unconfigured, an unconfigured
+            // source is never queried, and the renewal only ran *inside* a query. So the one moment
+            // it was needed was the one moment it could not happen.
+            credentials.spotifyBrowserTokenEnabled ||
             (!SpotifyWebToken.BLOCKED_BY_SPOTIFY && !credentials.spDcCookie.isNullOrBlank())
 
     override val unavailableReason: String?
         get() = when {
+            // A renewable token is not an errand: say what to fix rather than "copy a fresh one".
+            tokenRejected && credentials.spotifyBrowserTokenEnabled ->
+                "Spotify refused the token — the sp_dc cookie may have expired"
             tokenRejected -> "The pasted access token has expired — copy a fresh one"
             isConfigured -> null
             !credentials.spotifyWebToken.isNullOrBlank() ->
                 "The pasted access token has expired — copy a fresh one"
+            !credentials.spDcCookie.isNullOrBlank() ->
+                "Add a token, or switch on automatic renewal under Developer options"
             else -> SpotifyWebToken.BLOCKED_REASON
         }
 
@@ -53,6 +63,11 @@ class SpotifyLyricsProvider(private val credentials: ProviderCredentials) : Lyri
      * wrong problem entirely.
      */
     private var tokenRejected = false
+
+    /** Lets a test reach the refused-token state without a network round trip. */
+    internal fun noteRejectedForTest() {
+        tokenRejected = true
+    }
 
     override suspend fun fetch(request: LyricsRequest): LyricsDocument? =
         withContext(Dispatchers.IO) {

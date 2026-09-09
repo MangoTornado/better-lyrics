@@ -1,5 +1,8 @@
 package com.betterlyrics.app.lyrics.provider
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -94,31 +97,76 @@ object SpotifyWebToken {
     @Volatile
     var harvester: SpotifyBrowserToken? = null
 
-    /** The last harvest, for Settings to show. Cheap, and the only way to see why it failed. */
-    @Volatile
-    var lastHarvest: String? = null
-        private set
+    /**
+     * What the WebView harvest last did.
+     *
+     * A flow rather than a field: Compose cannot see a plain `var` change, so the hint under the
+     * switch stayed on whatever it said when the screen was first drawn — which read as "nothing is
+     * happening" whether or not anything was.
+     */
+    data class HarvestStatus(
+        val running: Boolean = false,
+        val detail: String? = null,
+        /** The token itself, so Settings can show that it worked and let it be copied. */
+        val token: String? = null,
+        val expiresAt: Long? = null,
+    )
+
+    private val _harvest = MutableStateFlow(HarvestStatus())
+    val harvest: StateFlow<HarvestStatus> = _harvest.asStateFlow()
 
     private suspend fun harvest(
         browser: SpotifyBrowserToken,
         credentials: ProviderCredentials,
     ): String? {
-        val cookie = credentials.spDcCookie?.takeIf { it.isNotBlank() } ?: return null
+        val cookie = credentials.spDcCookie?.takeIf { it.isNotBlank() }
+            ?: run {
+                _harvest.value = HarvestStatus(detail = "No sp_dc cookie is set")
+                return null
+            }
+
+        _harvest.value = _harvest.value.copy(running = true, detail = "Asking the player…")
         return when (val result = browser.harvest(cookie)) {
             is SpotifyBrowserToken.Result.Harvested -> {
                 credentials.cachedSpotifyToken = result.token
                 // Trust the token's own claim; fall back to the hour Spotify actually grants.
-                credentials.cachedSpotifyTokenExpiresAt =
-                    result.expiresAt ?: (System.currentTimeMillis() + 55 * 60_000L)
-                lastHarvest = "Renewed from the cookie"
+                val expiresAt = result.expiresAt ?: (System.currentTimeMillis() + 55 * 60_000L)
+                credentials.cachedSpotifyTokenExpiresAt = expiresAt
+                _harvest.value = HarvestStatus(
+                    detail = "Renewed from the cookie",
+                    token = result.token,
+                    expiresAt = expiresAt,
+                )
                 result.token
             }
 
             is SpotifyBrowserToken.Result.Failed -> {
-                lastHarvest = result.reason
+                _harvest.value = HarvestStatus(detail = result.reason)
                 null
             }
         }
+    }
+
+    /**
+     * Runs the harvest now, whatever the caches say.
+     *
+     * The button in Settings. Without it the only way to find out whether a cookie still works was
+     * to play a track and watch for lyrics that never came — and the answer to "is my cookie
+     * expired" should not require guessing.
+     */
+    suspend fun renewNow(credentials: ProviderCredentials): HarvestStatus {
+        val browser = harvester
+            ?: return HarvestStatus(detail = "No WebView is available on this device").also {
+                _harvest.value = it
+            }
+        if (credentials.spDcCookie.isNullOrBlank()) {
+            return HarvestStatus(detail = "No sp_dc cookie is set").also { _harvest.value = it }
+        }
+
+        credentials.cachedSpotifyToken = null
+        credentials.cachedSpotifyTokenExpiresAt = 0
+        harvest(browser, credentials)
+        return _harvest.value
     }
 
     /**

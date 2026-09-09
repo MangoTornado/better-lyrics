@@ -1147,17 +1147,53 @@ fun SettingsSheet(
                         accent = accent,
                         onCheckedChange = { store.setSpotifyBrowserToken(it) },
                     )
+                    val harvest by SpotifyWebToken.harvest.collectAsStateWithLifecycle()
                     Hint(
                         when {
                             !settings.spotifyBrowserToken ->
                                 "Off, so the token above stays an errand — about one an hour."
                             settings.spDcCookie.isNullOrBlank() ->
                                 "On, but there is no sp_dc cookie to use. Add one above."
+                            harvest.running -> "Asking the player for a token…"
+                            harvest.detail != null -> harvest.detail!!
                             else ->
-                                SpotifyWebToken.lastHarvest
-                                    ?: "On. The token is renewed the next time Spotify is asked."
+                                "On. Renew now to check the cookie works, or wait for the next " +
+                                    "time Spotify is asked."
                         },
                     )
+
+                    if (settings.spotifyBrowserToken && !settings.spDcCookie.isNullOrBlank()) {
+                        val scope = rememberCoroutineScope()
+                        ActionRow(
+                            title = if (harvest.running) "Renewing…" else "Renew now",
+                            subtitle = "Loads the player and reads the token it is given",
+                            accent = accent,
+                            onClick = {
+                                if (!harvest.running) {
+                                    scope.launch { SpotifyWebToken.renewNow(container.settings) }
+                                }
+                            },
+                        )
+
+                        // Shown rather than hidden: the point of pressing the button is to find out
+                        // whether it worked, and a masked field cannot tell you that.
+                        harvest.token?.let { token ->
+                            val minutes = harvest.expiresAt
+                                ?.let { (it - System.currentTimeMillis()) / 60_000 }
+                            SecretField(
+                                label = "The token it fetched",
+                                help = "Read-only, and kept in memory rather than in the box above " +
+                                    "— a token pasted there is treated as your choice and is never " +
+                                    "replaced, which would stop the renewal that just produced " +
+                                    "this one. Copy it if you want it elsewhere." +
+                                    (minutes?.let { "\n\nExpires in about $it minutes." } ?: ""),
+                                value = token,
+                                accent = accent,
+                                onChange = {},
+                                readOnly = true,
+                            )
+                        }
+                    }
                     Help(
                         "Spotify closed the endpoint that traded a cookie for a token, so the " +
                             "only thing that still mints one is the player itself — and " +
@@ -1817,6 +1853,8 @@ private fun SecretField(
     value: String,
     accent: Color,
     onChange: (String) -> Unit,
+    /** For a value the app produced rather than one the user types. Still selectable, to copy. */
+    readOnly: Boolean = false,
 ) {
     var text by remember(value) { mutableStateOf(value) }
     Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
@@ -1843,6 +1881,7 @@ private fun SecretField(
                 textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
                 cursorBrush = SolidColor(accent),
                 singleLine = true,
+                readOnly = readOnly,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (text.isEmpty()) {

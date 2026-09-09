@@ -139,7 +139,7 @@ class SpotifyBrowserTokenTest {
 
         assertNull(runBlocking { SpotifyWebToken.get(credentials) })
         // Settings shows this. Without it, "no lyrics" is the only symptom of a stale cookie.
-        assertEquals("the cookie has expired", SpotifyWebToken.lastHarvest)
+        assertEquals("the cookie has expired", SpotifyWebToken.harvest.value.detail)
         assertNull(credentials.cachedSpotifyToken)
     }
 
@@ -185,6 +185,86 @@ class SpotifyBrowserTokenTest {
         credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() - 1
 
         assertNull(runBlocking { SpotifyWebToken.get(credentials) })
+    }
+
+    @Test
+    fun `a cookie and the switch are enough for Spotify to be asked at all`() {
+        // The bug this exists to stop coming back: with no pasted token the source read as
+        // unconfigured, an unconfigured source is never queried, and the renewal only ran *inside* a
+        // query. So the one moment it was needed was the one moment it could not happen — the
+        // feature looked switched on and did nothing, with no hint as to why.
+        val withRenewal = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        assertTrue(SpotifyLyricsProvider(withRenewal).isConfigured)
+        assertNull(SpotifyLyricsProvider(withRenewal).unavailableReason)
+
+        val withoutRenewal = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = false)
+        assertFalse(SpotifyLyricsProvider(withoutRenewal).isConfigured)
+    }
+
+    @Test
+    fun `renew now runs whatever the cache says, and reports the outcome`() {
+        val fresh = jwt(3600)
+        val harvester = RecordingHarvester(
+            SpotifyBrowserToken.Result.Harvested(fresh, SpotifyWebToken.expiryOf(fresh)),
+        )
+        SpotifyWebToken.harvester = harvester
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        // A token that is still perfectly valid: the button has to ignore it, because the reason for
+        // pressing it is to find out whether the cookie still works.
+        credentials.cachedSpotifyToken = "a-valid-token"
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 3_000_000
+
+        val status = runBlocking { SpotifyWebToken.renewNow(credentials) }
+        assertEquals(1, harvester.calls)
+        assertEquals(fresh, status.token)
+        assertEquals("Renewed from the cookie", status.detail)
+        assertFalse(status.running)
+    }
+
+    @Test
+    fun `renew now says which thing is missing`() {
+        SpotifyWebToken.harvester = RecordingHarvester(
+            SpotifyBrowserToken.Result.Harvested(jwt(3600), null),
+        )
+        val noCookie = FakeCredentials(spDcCookie = null, spotifyBrowserTokenEnabled = true)
+        assertEquals(
+            "No sp_dc cookie is set",
+            runBlocking { SpotifyWebToken.renewNow(noCookie) }.detail,
+        )
+
+        SpotifyWebToken.harvester = null
+        val noWebView = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        assertEquals(
+            "No WebView is available on this device",
+            runBlocking { SpotifyWebToken.renewNow(noWebView) }.detail,
+        )
+    }
+
+    @Test
+    fun `the status is observable, so the screen can change when it does`() {
+        val fresh = jwt(3600)
+        SpotifyWebToken.harvester = RecordingHarvester(
+            SpotifyBrowserToken.Result.Harvested(fresh, SpotifyWebToken.expiryOf(fresh)),
+        )
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+
+        // A plain field would not recompose: the hint stayed on whatever it said when the screen was
+        // first drawn, which read as "nothing is happening" whether or not anything was.
+        runBlocking { SpotifyWebToken.renewNow(credentials) }
+        assertEquals(fresh, SpotifyWebToken.harvest.value.token)
+        assertEquals(SpotifyWebToken.expiryOf(fresh), SpotifyWebToken.harvest.value.expiresAt)
+    }
+
+    @Test
+    fun `a refused token blames the cookie once renewal is on`() {
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        val provider = SpotifyLyricsProvider(credentials)
+        provider.noteRejectedForTest()
+        // "Copy a fresh one" is the wrong instruction when nothing was pasted.
+        assertEquals(
+            "Spotify refused the token — the sp_dc cookie may have expired",
+            provider.unavailableReason,
+        )
     }
 
     @Test
