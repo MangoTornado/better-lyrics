@@ -349,11 +349,16 @@ fun SettingsSheet(
                 )
 
                 ToggleRow(
-                    title = "Keep the screen on",
-                    subtitle = "Applies next time the lyrics screen comes to the front",
+                    title = "Keep the screen on while playing",
+                    subtitle = "Only while something is playing — it times out normally otherwise",
                     checked = settings.keepScreenOn,
                     accent = accent,
                     onCheckedChange = { store.setKeepScreenOn(it) },
+                )
+                Help(
+                    "The screen is the most expensive thing on a phone by a wide margin, so this " +
+                        "is tied to playback rather than to the app being open. Pausing, or " +
+                        "reaching the end of a track, lets it time out as usual.",
                 )
             }
 

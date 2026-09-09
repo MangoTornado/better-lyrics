@@ -1,7 +1,6 @@
 package com.betterlyrics.app.media
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import com.betterlyrics.app.lyrics.provider.Http
 import com.betterlyrics.app.lyrics.provider.ProviderCredentials
 import kotlinx.coroutines.Dispatchers
@@ -155,7 +154,7 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
         runCatching {
             Http.client.newCall(Http.request(url, headers)).execute().use { response ->
                 if (!response.isSuccessful) return@runCatching null
-                response.body?.bytes()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                response.body?.bytes()?.let(ArtworkDecoding::decode)
             }
         }.getOrNull()
     }
@@ -193,6 +192,7 @@ class CacheServerExtras(private val credentials: ProviderCredentials) {
 
 
     private companion object {
+        /** URLs and identity rather than bitmaps, so holding a few is free. */
         const val CACHE_SIZE = 8
     }
 }

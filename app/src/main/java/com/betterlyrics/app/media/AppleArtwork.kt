@@ -1,7 +1,6 @@
 package com.betterlyrics.app.media
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import com.betterlyrics.app.lyrics.provider.Http
 import com.betterlyrics.app.lyrics.provider.bearerValue
 import com.betterlyrics.app.lyrics.provider.LyricsRequest
@@ -68,7 +67,7 @@ class AppleArtwork(private val credentials: ProviderCredentials) {
         runCatching {
             Http.client.newCall(Http.request(url)).execute().use { response ->
                 if (!response.isSuccessful) return@runCatching null
-                response.body?.bytes()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                response.body?.bytes()?.let(ArtworkDecoding::decode)
             }
         }.getOrNull()
     }
@@ -171,6 +170,9 @@ class AppleArtwork(private val credentials: ProviderCredentials) {
          * user can actually get hold of without a paid developer membership.
          */
         const val API = "https://amp-api.music.apple.com"
+        /**
+         * Only URLs and identity, not bitmaps, so this one can afford to be generous.
+         */
         const val CACHE_SIZE = 8
     }
 }

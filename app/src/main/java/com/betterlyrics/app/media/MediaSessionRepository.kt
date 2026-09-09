@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -297,10 +296,10 @@ class MediaSessionRepository(private val context: Context) {
                     val parsed = android.net.Uri.parse(uri)
                     when (parsed.scheme) {
                         "http", "https" ->
-                            java.net.URL(uri).openStream().use { BitmapFactory.decodeStream(it) }
+                            java.net.URL(uri).openStream().use { ArtworkDecoding.decode(it) }
 
                         else -> context.contentResolver.openInputStream(parsed)
-                            ?.use { BitmapFactory.decodeStream(it) }
+                            ?.use { ArtworkDecoding.decode(it) }
                     }
                 }.getOrNull()
             } ?: return@launch
@@ -436,6 +435,10 @@ class MediaSessionRepository(private val context: Context) {
         /** Roughly 0.4 s, 0.8 s, 1.6 s, 3.2 s, 6.4 s — long enough to cover the bind. */
         const val MAX_BIND_ATTEMPTS = 5
         const val BIND_RETRY_BASE_MS = 400L
-        const val ARTWORK_CACHE_SIZE = 6
+        /**
+         * Decoded covers, so the count is a memory budget rather than a convenience. Three: the
+         * track on screen, the one before it, and one in flight.
+         */
+        const val ARTWORK_CACHE_SIZE = 3
     }
 }

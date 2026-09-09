@@ -99,7 +99,11 @@ class MainActivity : ComponentActivity() {
                     autoEnter = settings.popupAutoEnter,
                     shape = settings.popupShape,
                 )
-            }.distinctUntilChanged().collect { applyPopupParams(it.isPlaying) }
+            }.distinctUntilChanged().collect {
+                applyPopupParams(it.isPlaying)
+                // Pausing must let the screen time out, and it is the same signal.
+                applyKeepScreenOn()
+            }
         }
     }
 
@@ -294,8 +298,21 @@ class MainActivity : ComponentActivity() {
 
     // ---- misc ---------------------------------------------------------------
 
+    /**
+     * Hold the screen awake — but only while something is actually playing.
+     *
+     * The screen is the most expensive thing on a phone by a wide margin, and this was applied on
+     * the setting alone: the app would sit on "Nothing playing" holding the display on until the
+     * battery ran down. The setting means "do not time out *while I am reading along*", which is a
+     * statement about playback, not about the app being open.
+     *
+     * Re-applied whenever playback changes, not once on resume, or a track ending would leave the
+     * flag set for as long as the app stayed open.
+     */
     private fun applyKeepScreenOn() {
-        if (container.settings.current.keepScreenOn) {
+        val wanted = container.settings.current.keepScreenOn &&
+            container.media.snapshot.value.playback.isPlaying
+        if (wanted) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

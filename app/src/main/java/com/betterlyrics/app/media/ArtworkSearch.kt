@@ -1,7 +1,6 @@
 package com.betterlyrics.app.media
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import com.betterlyrics.app.lyrics.provider.Http
 import com.betterlyrics.app.settings.ArtworkSource
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +28,16 @@ class ArtworkSearch {
     /** Below this on the short edge, a cover is worth trying to improve on. */
     private val smallEnoughToReplace = 500
 
-    private val cache = LinkedHashMap<String, Bitmap?>()
+    /**
+     * Covers found, and separately the keys known to have none.
+     *
+     * Split because the two cost completely different things to keep. A decoded cover is megabytes,
+     * so only the last few are worth holding — but a *miss* is a byte of bookkeeping and remembering
+     * it saves a network round trip, so those can be kept for far longer. One map of nullable
+     * bitmaps had to be sized for the expensive case, which meant forgetting the cheap one too.
+     */
+    private val found = LinkedHashMap<String, Bitmap>()
+    private val absent = LinkedHashSet<String>()
 
     fun wouldImproveOn(existing: Bitmap?): Boolean =
         existing == null || minOf(existing.width, existing.height) < smallEnoughToReplace
@@ -45,7 +53,8 @@ class ArtworkSearch {
         withContext(Dispatchers.IO) {
             if (source == ArtworkSource.PLAYER) return@withContext null
             val key = "${source.name}|${track.cacheKey}"
-            if (cache.containsKey(key)) return@withContext cache[key]
+            found[key]?.let { return@withContext it }
+            if (key in absent) return@withContext null
 
             val url = when (source) {
                 ArtworkSource.ITUNES -> itunesUrl(track)
@@ -54,10 +63,13 @@ class ArtworkSearch {
             }
             val bitmap = url?.let { load(it) }
 
-            // Remembered either way: a track with no cover anywhere must not be searched for
-            // again every time the screen redraws.
-            if (cache.size >= CACHE_SIZE) cache.keys.firstOrNull()?.let(cache::remove)
-            cache[key] = bitmap
+            if (bitmap == null) {
+                if (absent.size >= MISS_MEMO) absent.firstOrNull()?.let(absent::remove)
+                absent += key
+            } else {
+                if (found.size >= BITMAPS_KEPT) found.keys.firstOrNull()?.let(found::remove)
+                found[key] = bitmap
+            }
             bitmap
         }
 
@@ -124,12 +136,20 @@ class ArtworkSearch {
     private fun load(url: String): Bitmap? = runCatching {
         Http.client.newCall(Http.request(url)).execute().use { response ->
             if (!response.isSuccessful) return null
-            response.body?.bytes()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            response.body?.bytes()?.let(ArtworkDecoding::decode)
         }
     }.getOrNull()
 
     private companion object {
         val ACCEPT_JSON = mapOf("Accept" to "application/json")
-        const val CACHE_SIZE = 8
+
+        /**
+         * How many covers to hold. Three: the one on screen, the one before it, and the one being
+         * prefetched. At a megabyte or four each, generosity here is measured in tens of megabytes.
+         */
+        const val BITMAPS_KEPT = 3
+
+        /** How many "nothing here" answers to remember. Cheap, so many. */
+        const val MISS_MEMO = 200
     }
 }

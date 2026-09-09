@@ -168,7 +168,13 @@ class AppContainer(context: Context) {
                 lastActivityAt = System.currentTimeMillis()
                 continue
             }
-            if (!MediaNotificationListener.isBound) continue
+            // Already stood down. Nothing to do until the app is opened again, and a tick a
+            // minute forever to discover that is exactly the sort of thing this whole mechanism
+            // exists to stop.
+            if (!MediaNotificationListener.isBound) {
+                while (!uiVisible) delay(IDLE_CHECK_INTERVAL_MS)
+                continue
+            }
 
             val idleFor = System.currentTimeMillis() - lastActivityAt
             if (idleFor < timeout * 60_000L) continue

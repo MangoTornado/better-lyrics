@@ -1,7 +1,6 @@
 package com.betterlyrics.app.media
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import com.betterlyrics.app.lyrics.provider.Http
 import com.betterlyrics.app.lyrics.provider.ProviderCredentials
 import com.betterlyrics.app.lyrics.provider.SpotifyWebToken
@@ -105,7 +104,7 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
         }.getOrNull() ?: return@withContext null
 
         val bitmap = runCatching {
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ArtworkDecoding.decode(bytes)
         }.getOrNull() ?: return@withContext null
 
         remember(bitmapCache, url, bitmap)
@@ -192,7 +191,11 @@ class SpotifyExtras(private val credentials: ProviderCredentials) {
     private companion object {
         const val WEB_API = "https://api.spotify.com/v1"
         const val SPCLIENT = "https://spclient.wg.spotify.com"
-        const val CACHE_ENTRIES = 6
+        /**
+         * Shared by the details cache and the bitmap cache. Three, because the second holds decoded
+         * covers and artist images — megabytes each, where the first holds a handful of strings.
+         */
+        const val CACHE_ENTRIES = 3
     }
 }
 
