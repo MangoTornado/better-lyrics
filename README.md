@@ -178,8 +178,8 @@ his service to run, not this app's to lean on.
 Needs the Android SDK (platform 36) and a JDK 17+.
 
 ```bash
-./gradlew :app:assembleDebug          # debug APK
-./gradlew :app:assembleRelease        # release APK (~51 MB)
+./gradlew :app:assembleDebug          # debug APK (~83 MB: two architectures, unminified)
+./gradlew :app:assembleRelease        # release APK (~34 MB: arm64 only, minified)
 ./gradlew :app:testDebugUnitTest      # unit tests
 ```
 
