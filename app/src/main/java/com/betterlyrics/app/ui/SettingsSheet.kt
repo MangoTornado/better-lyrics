@@ -581,7 +581,18 @@ fun SettingsSheet(
                         settings.syncOffsetMs == 0 -> "In step with the player."
                         settings.syncOffsetMs > 0 -> "Lyrics run ${settings.syncOffsetMs}ms early."
                         else -> "Lyrics run ${-settings.syncOffsetMs}ms late."
-                    } + " Bluetooth usually needs a positive value.",
+                    } + " Bluetooth needs a negative value.",
+                )
+                Help(
+                    "Which way to go, in terms of what you notice rather than the sign: if the " +
+                        "highlight reaches a word before you hear it, go negative. If you hear a " +
+                        "word before the highlight gets there, go positive.\n\nBluetooth is " +
+                        "almost always the first case, and needs a negative value. The player " +
+                        "reports where it is in the file, but the earbuds are 150 to 250 " +
+                        "milliseconds behind that — so the lyrics are running ahead of your ears " +
+                        "and need holding back.\n\nThe scrubber and the times either side of it " +
+                        "are deliberately not shifted. They report where the player actually is, " +
+                        "which is what you want when tapping a line to jump.",
                 )
                 Row(Modifier.padding(bottom = 8.dp)) {
                     StepButton("−50", accent) { store.setSyncOffset(settings.syncOffsetMs - 50) }

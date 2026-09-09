@@ -208,8 +208,11 @@ commands, and the certificate fingerprint so you can check an APK is really your
 3. Optional: paste any tokens you have into **Settings → Tokens and endpoints**.
 
 The one control most people end up wanting is **Sync offset**. Players and audio routes
-add their own latency — Bluetooth in particular can be a couple of hundred milliseconds
-out — and this nudges every timestamp to compensate.
+add their own latency, and this nudges every timestamp to compensate.
+
+Which way: if the highlight reaches a word *before* you hear it, go negative. **Bluetooth
+needs a negative value** — the player reports its position in the file, but the earbuds are
+150–250 ms behind that, so the lyrics run ahead of your ears and want holding back.
 
 ## Performance
 
