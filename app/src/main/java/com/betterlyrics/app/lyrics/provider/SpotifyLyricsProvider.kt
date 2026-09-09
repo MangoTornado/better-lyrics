@@ -153,6 +153,12 @@ class SpotifyLyricsProvider(
                 null -> "Spotify did not answer"
                 404 -> "Spotify has no lyrics for this track (404)"
                 200 -> "Spotify answered with no usable lines"
+                // Verified against the live endpoint: a token from a signed-out player is a real,
+                // full-length token that is accepted as a credential — no 401 — but has no user
+                // attached, and this endpoint answers 400 to it. The same request with a signed-in
+                // token returned 200. So 400 is about who the token is, not what was asked.
+                400 -> "Spotify rejected the request (400) — the token is not signed in, so the " +
+                    "sp_dc cookie is not working"
                 else -> "Spotify answered HTTP $status"
             }
             null

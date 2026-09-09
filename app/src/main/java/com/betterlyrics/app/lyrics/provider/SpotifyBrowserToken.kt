@@ -65,6 +65,25 @@ open class SpotifyBrowserToken(private val context: Context) {
     }
 
     /**
+     * Whether the player considers itself signed in.
+     *
+     * The player asks `/api/token` before it asks for anything else, and the answer carries
+     * `isAnonymous`. A page with no usable cookie still gets a token — a real, valid, 140-character
+     * one — but with no user attached, and `color-lyrics` answers **400** to it. Verified against the
+     * live endpoint with no cookie set: 400 with `market=from_token`, with `market=US`, and with no
+     * market at all. So the status is not about the request being malformed, and a token that
+     * harvests cleanly can still be useless.
+     *
+     * Length is a tell but not the test — measured against the live player, an anonymous token was
+     * 140 characters and a signed-in one 403. [MIN_TOKEN_LENGTH] accepts both, deliberately: a
+     * length threshold would be guessing at a format Spotify can change, whereas `isAnonymous` is
+     * the player's own answer.
+     *
+     * Catching it here is the difference between "HTTP 400" and "your cookie is not signing you in".
+     */
+    private enum class Session { UNKNOWN, ANONYMOUS, SIGNED_IN }
+
+    /**
      * Loads the player and waits for a token.
      *
      * Returns [Result.Failed] rather than throwing: a missing token is an ordinary outcome and the
@@ -136,8 +155,16 @@ open class SpotifyBrowserToken(private val context: Context) {
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(view, true)
-            // On `.spotify.com` so it reaches the accounts host and the player alike.
-            setCookie(".spotify.com", "sp_dc=$cookie; Path=/; Secure; HttpOnly; SameSite=None")
+            // The first argument is a URL, not a host. It was `".spotify.com"`, which has no scheme
+            // — and a `Secure` cookie is only accepted from a secure origin, so the cookie was
+            // being dropped and the player loaded signed out. It still issued a token, which is why
+            // this looked like it worked: an anonymous token is a real token, just useless. The
+            // scope now comes from an explicit `Domain` instead of from the URL, so it still covers
+            // the accounts host and the player alike.
+            setCookie(
+                PLAYER_URL,
+                "sp_dc=$cookie; Domain=.spotify.com; Path=/; Secure; HttpOnly; SameSite=None",
+            )
             flush()
         }
     }
@@ -145,16 +172,49 @@ open class SpotifyBrowserToken(private val context: Context) {
     /** Resolves with the first real token the page's own requests carry. */
     private suspend fun awaitToken(view: WebView): Result = suspendCancellableCoroutine { continuation ->
         val settled = AtomicBoolean(false)
+        // `/api/token` is answered before the player uses a Bearer anywhere, so by the time a token
+        // shows up this is normally already known. If it is not, the token is taken as-is rather
+        // than held back — a working harvest must not start failing on a missed signal.
+        val session = java.util.concurrent.atomic.AtomicReference(Session.UNKNOWN)
+
+        val finish = { result: Result ->
+            if (settled.compareAndSet(false, true) && continuation.isActive) {
+                continuation.resume(result)
+            }
+        }
 
         view.addJavascriptInterface(
-            TokenBridge { value ->
-                val token = bearerValue(value) ?: return@TokenBridge
-                if (token.length < MIN_TOKEN_LENGTH) return@TokenBridge
-                if (!settled.compareAndSet(false, true)) return@TokenBridge
-                if (continuation.isActive) {
-                    continuation.resume(Result.Harvested(token, SpotifyWebToken.expiryOf(token)))
-                }
-            },
+            TokenBridge(
+                onToken = { value ->
+                    val token = bearerValue(value)
+                    if (token != null && token.length >= MIN_TOKEN_LENGTH) {
+                        if (session.get() == Session.ANONYMOUS) {
+                            finish(
+                                Result.Failed(
+                                    "the player loaded but is not signed in, so its token cannot " +
+                                        "read lyrics — copy a fresh sp_dc cookie from a signed-in " +
+                                        "browser",
+                                ),
+                            )
+                        } else {
+                            finish(Result.Harvested(token, SpotifyWebToken.expiryOf(token)))
+                        }
+                    }
+                },
+                onSession = { anonymous ->
+                    session.set(if (anonymous) Session.ANONYMOUS else Session.SIGNED_IN)
+                    // Fail as soon as it is known, rather than waiting out the timeout for a token
+                    // that would be rejected anyway.
+                    if (anonymous) {
+                        finish(
+                            Result.Failed(
+                                "Spotify did not sign the player in — the sp_dc cookie is expired " +
+                                    "or wrong, so copy a fresh one from a signed-in browser",
+                            ),
+                        )
+                    }
+                },
+            ),
             BRIDGE,
         )
 
@@ -171,10 +231,18 @@ open class SpotifyBrowserToken(private val context: Context) {
      * renames what it cannot see being called, and nothing in Kotlin calls this — the page does.
      * See `proguard-rules.pro`.
      */
-    private class TokenBridge(private val onValue: (String) -> Unit) {
+    private class TokenBridge(
+        private val onToken: (String) -> Unit,
+        private val onSession: (Boolean) -> Unit,
+    ) {
         @JavascriptInterface
         fun onToken(value: String) {
-            onValue(value)
+            onToken.invoke(value)
+        }
+
+        @JavascriptInterface
+        fun onSession(anonymous: Boolean) {
+            onSession.invoke(anonymous)
         }
     }
 
@@ -245,6 +313,22 @@ open class SpotifyBrowserToken(private val context: Context) {
                 } catch (e) {}
               };
 
+              // The player's own answer to "am I signed in?". Read from the response rather than
+              // guessed at: an anonymous session still yields a full-length token, and the only
+              // place the difference is stated is this body.
+              var reportSession = function (url, response) {
+                try {
+                  if (String(url).indexOf('/api/token') === -1) return;
+                  response.clone().json().then(function (body) {
+                    try {
+                      if (body && typeof body.isAnonymous === 'boolean') {
+                        $BRIDGE.onSession(body.isAnonymous);
+                      }
+                    } catch (e) {}
+                  }).catch(function () {});
+                } catch (e) {}
+              };
+
               var nativeFetch = window.fetch;
               if (nativeFetch) {
                 window.fetch = function (input, init) {
@@ -252,7 +336,14 @@ open class SpotifyBrowserToken(private val context: Context) {
                     if (init) readHeaders(init.headers);
                     if (input && input.headers) readHeaders(input.headers);
                   } catch (e) {}
-                  return nativeFetch.apply(this, arguments);
+                  var url = '';
+                  try {
+                    url = (input && input.url) ? input.url : String(input);
+                  } catch (e) {}
+                  return nativeFetch.apply(this, arguments).then(function (response) {
+                    reportSession(url, response);
+                    return response;
+                  });
                 };
               }
 

@@ -205,17 +205,41 @@ class NoMatchReasonTest {
 
     @Test
     fun `an unexpected status is named rather than guessed at`() = runBlocking {
-        // 400 rather than 502: `Http.get` throws for 429 and anything 5xx, treating them as "not
-        // now" rather than "not here", so those never reach this path at all — the source test
-        // prints the exception instead. What lands here is 2xx, 401, 403, 404 and the odd 4xx.
-        val server = FakeHttp(status = 400, body = "bad request")
+        // Not 502: `Http.get` throws for 429 and anything 5xx, treating them as "not now" rather
+        // than "not here", so those never reach this path — the source test prints the exception.
+        // Not 400 either: that one has a known, specific meaning here and its own message.
+        val server = FakeHttp(status = 418, body = "teapot")
         try {
             val provider = SpotifyLyricsProvider(
                 FakeCredentials(spotifyWebToken = "x".repeat(120)),
                 lyricsBase = server.url,
             )
             assertNull(provider.fetch(lemon.copy(spotifyTrackId = "7Cd17G3oNQ34OWUwS8ZxfR")))
-            assertEquals("Spotify answered HTTP 400", provider.noMatchReason)
+            assertEquals("Spotify answered HTTP 418", provider.noMatchReason)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `a signed-out token is named as such, not reported as a bad request`() = runBlocking {
+        // Reported as "http 400 from spotify" for Blinding Lights — a track that certainly has
+        // lyrics. Verified against the live endpoint: a signed-out player still issues a real,
+        // full-length token, it is accepted rather than refused, and this endpoint answers 400
+        // because no user is attached. The same request with a signed-in token returned 200.
+        val server = FakeHttp(status = 400, body = "")
+        val credentials = FakeCredentials(spDcCookie = "a-cookie", spotifyBrowserTokenEnabled = true)
+        credentials.cachedSpotifyToken = "x".repeat(140)
+        credentials.cachedSpotifyTokenExpiresAt = System.currentTimeMillis() + 3_000_000
+        try {
+            val provider = SpotifyLyricsProvider(credentials, lyricsBase = server.url)
+            assertNull(provider.fetch(lemon.copy(spotifyTrackId = "7Cd17G3oNQ34OWUwS8ZxfR")))
+
+            val reason = provider.noMatchReason!!
+            assertTrue(reason, reason.contains("not signed in"))
+            assertTrue(reason, reason.contains("sp_dc"))
+            // Not blamed on the track, which is what a bare "400" invited.
+            assertFalse(reason, reason.contains("no lyrics"))
         } finally {
             server.close()
         }
