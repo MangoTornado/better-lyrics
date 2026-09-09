@@ -19,6 +19,7 @@ class ProviderConfigurationTest {
         override val spotifyWebToken: String? = null,
         override val cacheServerUrl: String? = null,
         override val cacheServerKey: String? = null,
+        override val spotifyBrowserTokenEnabled: Boolean = false,
         override val appleDeveloperToken: String? = null,
         override val appleMusicUserToken: String? = null,
     ) : ProviderCredentials {

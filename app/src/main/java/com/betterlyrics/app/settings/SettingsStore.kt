@@ -277,6 +277,16 @@ data class Settings(
      * track with no token at all.
      */
     val cacheServerExtras: Boolean = false,
+
+    /**
+     * Let a hidden WebView renew the Spotify token from the `sp_dc` cookie.
+     *
+     * Off by default and behind developer options, because it is automated access to a service
+     * whose terms discourage it. A private server can take that position for one person; a signed
+     * APK that anybody installs is a different proposition, so this is a switch its owner throws
+     * rather than a feature that ships on.
+     */
+    val spotifyBrowserToken: Boolean = false,
 ) {
     /** True when a cache server is configured and the developer options are on. */
     val cacheServerActive: Boolean
@@ -285,6 +295,10 @@ data class Settings(
     /** True when that server should also hold the artwork and the tempo. */
     val cacheServerExtrasActive: Boolean
         get() = cacheServerActive && cacheServerExtras
+
+    /** Only with the switch on, developer options on, and a cookie to use. */
+    val spotifyBrowserTokenActive: Boolean
+        get() = developerMode && spotifyBrowserToken && !spDcCookie.isNullOrBlank()
 
     companion object {
         val DEFAULT_PROVIDER_ORDER = listOf(
@@ -446,6 +460,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         skippedUpdateVersion = prefs.trimmed(KEY_UPDATE_SKIPPED),
 
         developerMode = prefs.getBoolean(KEY_DEVELOPER_MODE, false),
+        spotifyBrowserToken = prefs.getBoolean(KEY_SPOTIFY_BROWSER_TOKEN, false),
         cacheServerUrl = prefs.trimmed(KEY_CACHE_SERVER_URL),
         cacheServerKey = secrets.trimmed(KEY_CACHE_SERVER_KEY),
         cacheServerMode = prefs.enum(KEY_CACHE_SERVER_MODE, CacheServerMode.PARALLEL),
@@ -657,6 +672,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     fun setDeveloperMode(value: Boolean) = edit { putBoolean(KEY_DEVELOPER_MODE, value) }
 
+    fun setSpotifyBrowserToken(value: Boolean) = edit {
+        putBoolean(KEY_SPOTIFY_BROWSER_TOKEN, value)
+    }
+
     fun updateCacheServerUrl(value: String?) = edit {
         putString(KEY_CACHE_SERVER_URL, value?.trim()?.trimEnd('/'))
     }
@@ -717,6 +736,9 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     override val cacheServerUrl: String?
         get() = current.cacheServerUrl?.takeIf { current.developerMode }
+
+    override val spotifyBrowserTokenEnabled: Boolean
+        get() = current.spotifyBrowserTokenActive
 
     override val cacheServerKey: String?
         get() = current.cacheServerKey?.takeIf { current.developerMode }
@@ -820,6 +842,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_UPDATE_CHECKED_AT = "update_checked_at"
         const val KEY_UPDATE_SKIPPED = "update_skipped_version"
         const val KEY_DEVELOPER_MODE = "developer_mode"
+        const val KEY_SPOTIFY_BROWSER_TOKEN = "spotify_browser_token"
         const val KEY_CACHE_SERVER_URL = "cache_server_url"
         const val KEY_CACHE_SERVER_KEY = "cache_server_key"
         const val KEY_CACHE_SERVER_MODE = "cache_server_mode"

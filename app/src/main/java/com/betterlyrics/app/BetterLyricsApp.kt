@@ -12,6 +12,8 @@ import com.betterlyrics.app.lyrics.provider.LrcLibProvider
 import com.betterlyrics.app.lyrics.provider.LyricsProvider
 import com.betterlyrics.app.lyrics.provider.MusixmatchProvider
 import com.betterlyrics.app.lyrics.provider.NeteaseProvider
+import com.betterlyrics.app.lyrics.provider.SpotifyBrowserToken
+import com.betterlyrics.app.lyrics.provider.SpotifyWebToken
 import com.betterlyrics.app.lyrics.provider.SpotifyLyricsProvider
 import com.betterlyrics.app.lyrics.romanize.Romanizer
 import com.betterlyrics.app.lyrics.translate.LyricsTranslator
@@ -122,6 +124,10 @@ class AppContainer(context: Context) {
     suspend fun lyricsCacheSizeBytes(): Long = cache.sizeBytes()
 
     init {
+        // The only place with both a Context and the settings. Installed unconditionally; whether it
+        // ever runs is decided per call by `spotifyBrowserTokenEnabled`.
+        SpotifyWebToken.harvester = SpotifyBrowserToken(context)
+
         // The whole app in one line: whatever the phone is playing decides what we look up.
         scope.launch {
             media.snapshot

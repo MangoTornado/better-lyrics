@@ -134,6 +134,13 @@ interface ProviderCredentials {
      */
     val cacheServerKey: String?
 
+    /**
+     * Whether a hidden WebView may renew the Spotify token from [spDcCookie].
+     *
+     * Behind developer options: see `Settings.spotifyBrowserTokenActive`.
+     */
+    val spotifyBrowserTokenEnabled: Boolean
+
     /** Optional: raises NetEase's per-IP limits and unlocks some regional catalogues. */
     val neteaseCookie: String?
 

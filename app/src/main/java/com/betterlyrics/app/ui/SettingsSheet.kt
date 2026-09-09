@@ -73,6 +73,7 @@ import com.betterlyrics.app.update.UpdateChecker
 import com.betterlyrics.app.update.Updater
 import com.betterlyrics.app.settings.ArtworkSource
 import com.betterlyrics.app.media.ServerSource
+import com.betterlyrics.app.lyrics.provider.SpotifyWebToken
 
 /**
  * Whether the long-form explanations are showing.
@@ -1138,6 +1139,40 @@ fun SettingsSheet(
                                     "are available until it expires.",
                         )
                     }
+
+                    ToggleRow(
+                        title = "Renew that token automatically",
+                        subtitle = "Uses your sp_dc cookie in a hidden WebView. No server needed",
+                        checked = settings.spotifyBrowserToken,
+                        accent = accent,
+                        onCheckedChange = { store.setSpotifyBrowserToken(it) },
+                    )
+                    Hint(
+                        when {
+                            !settings.spotifyBrowserToken ->
+                                "Off, so the token above stays an errand — about one an hour."
+                            settings.spDcCookie.isNullOrBlank() ->
+                                "On, but there is no sp_dc cookie to use. Add one above."
+                            else ->
+                                SpotifyWebToken.lastHarvest
+                                    ?: "On. The token is renewed the next time Spotify is asked."
+                        },
+                    )
+                    Help(
+                        "Spotify closed the endpoint that traded a cookie for a token, so the " +
+                            "only thing that still mints one is the player itself — and " +
+                            "Android ships a Chromium to run it in. This loads open.spotify.com " +
+                            "in a WebView with your cookie and reads the token the player is " +
+                            "given. Nothing is drawn on screen, and the view is destroyed as soon " +
+                            "as a token arrives.\n\nWhich is a different thing from reproducing " +
+                            "the signature the player signs that request with. That would be " +
+                            "defeating a check with a lifted secret, and this app does not do it. " +
+                            "Here the player signs its own request, as itself, with your cookie — " +
+                            "the token is one your own browser would have received.\n\nIt is " +
+                            "behind these developer options because it is still automated access " +
+                            "to a service whose terms discourage it. That is a call for whoever " +
+                            "runs this build, not something to ship switched on.",
+                    )
 
                     SecretField(
                         label = "Cache server URL",

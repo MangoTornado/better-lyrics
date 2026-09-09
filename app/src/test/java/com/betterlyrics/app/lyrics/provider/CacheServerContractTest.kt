@@ -27,6 +27,7 @@ class CacheServerContractTest {
     private class FakeCredentials(
         override val cacheServerUrl: String? = "http://192.168.1.20:8787",
         override val cacheServerKey: String? = null,
+        override val spotifyBrowserTokenEnabled: Boolean = false,
     ) : ProviderCredentials {
         override val lrcLibBaseUrl = Settings.DEFAULT_LRCLIB_URL
         override val neteaseBaseUrl = Settings.DEFAULT_NETEASE_URL

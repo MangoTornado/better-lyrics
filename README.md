@@ -77,6 +77,27 @@ A port of Spicy Lyrics' visual language, down to the curve constants:
 Backgrounds: **Living** (the drifting colour field), **Auto** (still in the floating
 window), **Cover art** with a blur slider, **Artist**, **Colour**, **Black**.
 
+## Renewing the Spotify token
+
+Spotify closed the endpoint that traded an `sp_dc` cookie for an access token, so the token has to
+be copied out of the web player by hand — and it lasts about an hour, which makes it an errand
+rather than a setting.
+
+**Settings → Developer → Renew that token automatically** removes the errand. The only thing that
+still mints a token is the player itself, and Android ships a Chromium to run it in: this loads
+open.spotify.com in a WebView with your cookie and reads the token the player is given. Nothing is
+drawn on screen, and the view is destroyed as soon as a token arrives. One launch an hour at most —
+the token is cached until its own `exp` claim says otherwise.
+
+That is a different thing from reproducing the signature the player signs its token request with.
+Doing *that* would mean lifting a secret to defeat a check, and this app does not: see
+`SpotifyWebToken.BLOCKED_BY_SPOTIFY`. Here the player signs its own request, as itself, with your
+cookie, and the token that comes back is one your own browser would have received.
+
+It is behind developer options, off by default, because it is still automated access to a service
+whose terms discourage it. For one person on their own device that is a call they can make; it is
+not something to ship switched on to everybody who installs a release.
+
 ## What a Spotify cookie adds
 
 Beyond its own lyrics, the same `sp_dc`-derived token buys three things a media session

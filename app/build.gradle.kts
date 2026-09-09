@@ -131,6 +131,9 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.palette)
+    // Injects a script before any page script runs, which is the only reliable way to see a
+    // header the Spotify player sets on its own requests. The platform WebView cannot do it.
+    implementation(libs.androidx.webkit)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
