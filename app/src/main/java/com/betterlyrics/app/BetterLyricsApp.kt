@@ -45,6 +45,8 @@ import com.betterlyrics.app.media.IsrcStore
 import com.betterlyrics.app.media.ServerSource
 import com.betterlyrics.app.media.MediaNotificationListener
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Hand-rolled container instead of a DI framework: there are eight objects, they are
@@ -136,10 +138,12 @@ class AppContainer(context: Context) {
      * open with nothing playing, and while something is playing with the app closed. It is only both
      * at once — closed *and* silent — that there is nothing to watch for.
      */
-    @Volatile
-    var uiVisible: Boolean = false
+    private val _uiVisible = MutableStateFlow(false)
+
+    var uiVisible: Boolean
+        get() = _uiVisible.value
         set(value) {
-            field = value
+            _uiVisible.value = value
             if (value) lastActivityAt = System.currentTimeMillis()
         }
 
@@ -168,20 +172,32 @@ class AppContainer(context: Context) {
                 lastActivityAt = System.currentTimeMillis()
                 continue
             }
-            // Already stood down. Nothing to do until the app is opened again, and a tick a
-            // minute forever to discover that is exactly the sort of thing this whole mechanism
-            // exists to stop.
+            // Already stood down. Wait for the app to be opened rather than ticking once a minute
+            // forever to discover it, which is the sort of thing this whole mechanism exists to
+            // stop.
+            //
+            // The binding is re-checked on a slow timer as well, and that backstop is the point:
+            // `_uiVisible` is a conflated flow, so an app opened and closed again before this
+            // coroutine is scheduled leaves nothing to observe — but `isBound` still reflects what
+            // actually happened. Without it, one quick open-and-close left the listener bound for
+            // the rest of the process's life.
             if (!MediaNotificationListener.isBound) {
-                while (!uiVisible) delay(IDLE_CHECK_INTERVAL_MS)
+                while (!MediaNotificationListener.isBound) {
+                    withTimeoutOrNull(IDLE_CHECK_INTERVAL_MS) { _uiVisible.first { it } }
+                }
                 continue
             }
 
             val idleFor = System.currentTimeMillis() - lastActivityAt
             if (idleFor < timeout * 60_000L) continue
 
-            // Let go of everything that was keeping this process awake. What remains has no bound
-            // service and no window, which makes it an empty background process: no callbacks, no
-            // wake-ups, and first in line when the system wants the memory back.
+            // Let go of everything that was keeping this process awake — and this is the only place
+            // that does, deliberately. Stopping the repository when the activity stopped froze the
+            // playback snapshot this loop reads: closing the app mid-song left it believing music
+            // was still playing and nothing ever stood down.
+            //
+            // What remains has no bound service and no window, which makes it an empty background
+            // process: no callbacks, no wake-ups, and first in line when the system wants memory.
             media.stop()
             MediaNotificationListener.standDown()
         }

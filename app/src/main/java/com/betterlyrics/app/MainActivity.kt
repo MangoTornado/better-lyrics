@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
                     enabled = settings.popupLyricsEnabled,
                     autoEnter = settings.popupAutoEnter,
                     shape = settings.popupShape,
+                    keepScreenOn = settings.keepScreenOn,
                 )
             }.distinctUntilChanged().collect {
                 applyPopupParams(it.isPlaying)
@@ -137,10 +138,29 @@ class MainActivity : ComponentActivity() {
      */
     override fun onStop() {
         super.onStop()
-        // A floating window is still on screen, so it still counts as visible and still watches.
-        if (isInPictureInPictureMode) return
+        // A floating window is still on screen, so it still counts as visible — unless this stop is
+        // the window being dismissed, which Android delivers *while still in* picture-in-picture
+        // rather than by restoring a normal window first. Without the `isFinishing` half, dismissing
+        // the popup left the app marked visible for ever, which gates the idle timer permanently:
+        // exactly the bug the timer exists to prevent.
+        container.uiVisible = isInPictureInPictureMode && !isFinishing
+
+        // Deliberately *not* stopping the media repository here.
+        //
+        // The idle watch decides when to let go, and it needs a live playback signal to decide with.
+        // Detaching the callbacks froze the last snapshot, so closing the app mid-song left
+        // `isPlaying` true forever and nothing ever stood down — while closing it paused and then
+        // playing from elsewhere could stand down mid-song. Keeping one controller's callbacks for
+        // the length of the timeout costs almost nothing; being wrong about what is playing costs
+        // the whole feature.
+    }
+
+    override fun onDestroy() {
+        // Belt and braces for the dismissal case above: whatever the state flags said, a destroyed
+        // activity is not on screen.
         container.uiVisible = false
-        container.media.stop()
+        runCatching { unregisterReceiver(popupActionReceiver) }
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -148,11 +168,6 @@ class MainActivity : ComponentActivity() {
         container.media.refresh()
         applyKeepScreenOn()
         applyPopupParams(container.media.snapshot.value.playback.isPlaying)
-    }
-
-    override fun onDestroy() {
-        runCatching { unregisterReceiver(popupActionReceiver) }
-        super.onDestroy()
     }
 
     // ---- popup lyrics -------------------------------------------------------
@@ -197,6 +212,13 @@ class MainActivity : ComponentActivity() {
         val enabled: Boolean,
         val autoEnter: Boolean,
         val shape: com.betterlyrics.app.settings.PopupShape,
+        /**
+         * Not a popup input, but the same collector applies it.
+         *
+         * Left out, `distinctUntilChanged` swallowed the emission — the settings flow fired, the
+         * tuple was unchanged, and the flag stayed as it was until playback happened to change.
+         */
+        val keepScreenOn: Boolean,
     )
 
     /**

@@ -29,12 +29,15 @@ class ArtworkSearch {
     private val smallEnoughToReplace = 500
 
     /**
-     * Covers found, and separately the keys known to have none.
+     * Covers found, and separately the searches that came back empty.
      *
      * Split because the two cost completely different things to keep. A decoded cover is megabytes,
      * so only the last few are worth holding — but a *miss* is a byte of bookkeeping and remembering
      * it saves a network round trip, so those can be kept for far longer. One map of nullable
      * bitmaps had to be sized for the expensive case, which meant forgetting the cheap one too.
+     *
+     * [absent] holds only searches that returned no artwork at all. A failed download is not in it:
+     * that is a fact about the network, and it should be retried.
      */
     private val found = LinkedHashMap<String, Bitmap>()
     private val absent = LinkedHashSet<String>()
@@ -61,15 +64,21 @@ class ArtworkSearch {
                 ArtworkSource.COVER_ART_ARCHIVE -> coverArtArchiveUrl(track)
                 ArtworkSource.PLAYER -> null
             }
-            val bitmap = url?.let { load(it) }
 
-            if (bitmap == null) {
+            // Only a search that came back with nothing is remembered as nothing. A *download* that
+            // failed says something about the network, not about the track — and `load` returns the
+            // same null for a timeout, a 503, a rate limit and a corrupt image. Filing those as
+            // "this track has no art" meant one bad moment on the CDN cost that track its cover for
+            // the rest of the process's life.
+            if (url == null) {
                 if (absent.size >= MISS_MEMO) absent.firstOrNull()?.let(absent::remove)
                 absent += key
-            } else {
-                if (found.size >= BITMAPS_KEPT) found.keys.firstOrNull()?.let(found::remove)
-                found[key] = bitmap
+                return@withContext null
             }
+
+            val bitmap = load(url) ?: return@withContext null
+            if (found.size >= BITMAPS_KEPT) found.keys.firstOrNull()?.let(found::remove)
+            found[key] = bitmap
             bitmap
         }
 
@@ -149,7 +158,7 @@ class ArtworkSearch {
          */
         const val BITMAPS_KEPT = 3
 
-        /** How many "nothing here" answers to remember. Cheap, so many. */
+        /** How many "no artwork exists for this" answers to remember. Cheap, so many. */
         const val MISS_MEMO = 200
     }
 }
