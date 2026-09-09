@@ -80,6 +80,96 @@ class SpotifyBrowserTokenTest {
         return "eyJhbGciOiJIUzI1NiJ9.$payload.${"s".repeat(120)}"
     }
 
+    /**
+     * The expiry comes from the player's reply, because the token does not carry one.
+     *
+     * Reported as the countdown in Settings always reading 55 minutes. It was: `expiryOf` decodes a
+     * token as a JWT, and Spotify's are opaque — 403 characters with no `.` in them, measured against
+     * the live player — so it returned null every time and the fallback was all anyone saw. Not only
+     * a display fault: the fallback claimed 55 minutes where the live token had 29, so a dead token
+     * counted as fresh for half an hour.
+     */
+    @Test
+    fun `the real expiry is read out of the player's token reply`() {
+        val harvester = SpotifyBrowserToken(org.robolectric.RuntimeEnvironment.getApplication())
+        val expiresAt = System.currentTimeMillis() + 29 * 60_000L
+        // The shape a live player actually returns, keys and all.
+        val payload = harvester.parsePayload(
+            """
+            {"clientId":"d8a5ed958d274c2e8ee717e6a4b0971d",
+             "accessToken":"${"BQCL".plus("x".repeat(399))}",
+             "accessTokenExpirationTimestampMs":$expiresAt,
+             "isAnonymous":false}
+            """.trimIndent(),
+        )
+
+        assertEquals(false, payload?.anonymous)
+        assertEquals(expiresAt, payload?.expiresAt)
+        assertEquals(403, payload?.token?.length)
+        // The thing that made the old approach impossible: no dots, so no `exp` to decode.
+        assertNull(SpotifyWebToken.expiryOf(payload!!.token!!))
+    }
+
+    @Test
+    fun `a signed-out reply is recognised however long its token is`() {
+        val harvester = SpotifyBrowserToken(org.robolectric.RuntimeEnvironment.getApplication())
+        val payload = harvester.parsePayload(
+            """{"accessToken":"${"x".repeat(140)}","isAnonymous":true}""",
+        )
+
+        assertEquals(true, payload?.anonymous)
+    }
+
+    @Test
+    fun `an expiry already in the past is ignored rather than obeyed`() {
+        val harvester = SpotifyBrowserToken(org.robolectric.RuntimeEnvironment.getApplication())
+        val payload = harvester.parsePayload(
+            """
+            {"accessToken":"${"x".repeat(200)}","isAnonymous":false,
+             "accessTokenExpirationTimestampMs":${System.currentTimeMillis() - 1_000}}
+            """.trimIndent(),
+        )
+
+        // Taking it would discard a token that has just arrived and works.
+        assertNull(payload?.expiresAt)
+    }
+
+    @Test
+    fun `nonsense in the reply is not a crash`() {
+        val harvester = SpotifyBrowserToken(org.robolectric.RuntimeEnvironment.getApplication())
+        assertNull(harvester.parsePayload("not json at all"))
+        assertNull(harvester.parsePayload("")?.token)
+    }
+
+    @Test
+    fun `a harvested expiry is what gets cached, not a guess`() = runBlocking {
+        val expiresAt = System.currentTimeMillis() + 29 * 60_000L
+        val credentials = FakeCredentials(spDcCookie = "cookie", spotifyBrowserTokenEnabled = true)
+        SpotifyWebToken.harvester = RecordingHarvester(
+            SpotifyBrowserToken.Result.Harvested("BQ${"x".repeat(401)}", expiresAt),
+        )
+
+        SpotifyWebToken.renewNow(credentials)
+
+        assertEquals(expiresAt, credentials.cachedSpotifyTokenExpiresAt)
+        assertEquals(expiresAt, SpotifyWebToken.harvest.value.expiresAt)
+    }
+
+    @Test
+    fun `without a stated expiry the guess is short rather than generous`() = runBlocking {
+        val credentials = FakeCredentials(spDcCookie = "cookie", spotifyBrowserTokenEnabled = true)
+        SpotifyWebToken.harvester = RecordingHarvester(
+            SpotifyBrowserToken.Result.Harvested("BQ${"x".repeat(401)}", null),
+        )
+
+        val before = System.currentTimeMillis()
+        SpotifyWebToken.renewNow(credentials)
+
+        val minutes = (credentials.cachedSpotifyTokenExpiresAt - before) / 60_000
+        // Under the 29 a live token had. Guessing long is what let a dead token look fresh.
+        assertTrue("guessed $minutes minutes", minutes in 15..25)
+    }
+
     @Test
     fun `no browser launches when the switch is off`() {
         val harvester = RecordingHarvester(

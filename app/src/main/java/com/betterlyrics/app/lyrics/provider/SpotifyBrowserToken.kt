@@ -13,6 +13,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
@@ -82,6 +88,26 @@ open class SpotifyBrowserToken(private val context: Context) {
      * Catching it here is the difference between "HTTP 400" and "your cookie is not signing you in".
      */
     private enum class Session { UNKNOWN, ANONYMOUS, SIGNED_IN }
+
+    /**
+     * What the player's `/api/token` reply says.
+     *
+     * Read in full rather than only for [Session], because it is also the only place the expiry is
+     * stated. Spotify's access tokens are not JWTs — measured against the live player, 403
+     * characters with no `.` in them at all — so there is nothing in the token to decode an `exp`
+     * out of, and the expiry shown in Settings was always the fallback constant. That mattered
+     * beyond the display: the fallback claimed 55 minutes where the real answer was 29, so a token
+     * counted as fresh for around half an hour after it had died, and the warm-up skipped renewing
+     * it.
+     *
+     * The `accessToken` here is byte-identical to the one the player then puts in its
+     * `Authorization` header, so taking both from this reply loses nothing.
+     */
+    internal data class TokenPayload(
+        val anonymous: Boolean?,
+        val token: String?,
+        val expiresAt: Long?,
+    )
 
     /**
      * Loads the player and waits for a token.
@@ -197,21 +223,38 @@ open class SpotifyBrowserToken(private val context: Context) {
                                 ),
                             )
                         } else {
-                            finish(Result.Harvested(token, SpotifyWebToken.expiryOf(token)))
+                            // No expiry: this path only sees the header, which does not carry one.
+                            // The payload below is where a real one comes from.
+                            finish(Result.Harvested(token, null))
                         }
                     }
                 },
-                onSession = { anonymous ->
-                    session.set(if (anonymous) Session.ANONYMOUS else Session.SIGNED_IN)
-                    // Fail as soon as it is known, rather than waiting out the timeout for a token
-                    // that would be rejected anyway.
-                    if (anonymous) {
-                        finish(
-                            Result.Failed(
-                                "Spotify did not sign the player in — the sp_dc cookie is expired " +
-                                    "or wrong, so copy a fresh one from a signed-in browser",
-                            ),
-                        )
+                onPayload = { json ->
+                    val payload = parsePayload(json)
+                    when {
+                        payload == null -> Unit
+
+                        payload.anonymous == true -> {
+                            session.set(Session.ANONYMOUS)
+                            // Fail as soon as it is known, rather than waiting out the timeout for a
+                            // token that would be refused anyway.
+                            finish(
+                                Result.Failed(
+                                    "Spotify did not sign the player in — the sp_dc cookie is " +
+                                        "expired or wrong, so copy a fresh one from a signed-in " +
+                                        "browser",
+                                ),
+                            )
+                        }
+
+                        // Preferred over the header: same token, and this is the only place the
+                        // expiry is stated.
+                        payload.token != null && payload.token.length >= MIN_TOKEN_LENGTH -> {
+                            session.set(Session.SIGNED_IN)
+                            finish(Result.Harvested(payload.token, payload.expiresAt))
+                        }
+
+                        else -> session.set(Session.SIGNED_IN)
                     }
                 },
             ),
@@ -233,18 +276,44 @@ open class SpotifyBrowserToken(private val context: Context) {
      */
     private class TokenBridge(
         private val onToken: (String) -> Unit,
-        private val onSession: (Boolean) -> Unit,
+        private val onPayload: (String) -> Unit,
     ) {
         @JavascriptInterface
         fun onToken(value: String) {
             onToken.invoke(value)
         }
 
+        /**
+         * The `/api/token` reply, as the JSON string the page received.
+         *
+         * Handed over whole and parsed in Kotlin rather than picked apart in the injected script: one
+         * crossing of the bridge, and the parsing sits where it can be read and tested.
+         */
         @JavascriptInterface
-        fun onSession(anonymous: Boolean) {
-            onSession.invoke(anonymous)
+        fun onTokenPayload(json: String) {
+            onPayload.invoke(json)
         }
     }
+
+    /**
+     * Reads [TokenPayload] out of the reply, tolerating anything unexpected in it.
+     *
+     * `internal` so it can be tested against a real captured reply: the alternative is a WebView and
+     * a live login, and the parsing is where the expiry was being lost.
+     */
+    internal fun parsePayload(json: String): TokenPayload? = runCatching {
+        val root = Json.parseToJsonElement(json).jsonObject
+        TokenPayload(
+            anonymous = root["isAnonymous"]?.jsonPrimitive?.booleanOrNull,
+            token = root["accessToken"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf {
+                it.isNotEmpty()
+            },
+            expiresAt = root["accessTokenExpirationTimestampMs"]?.jsonPrimitive?.longOrNull
+                // A timestamp in the past is not an expiry, it is a bug or a clock skew, and taking
+                // it would mean discarding a token that has just arrived and works.
+                ?.takeIf { it > System.currentTimeMillis() },
+        )
+    }.getOrNull()
 
     companion object {
         /** The script, for a test to assert on: it is the part with the delicate contract. */
@@ -313,17 +382,15 @@ open class SpotifyBrowserToken(private val context: Context) {
                 } catch (e) {}
               };
 
-              // The player's own answer to "am I signed in?". Read from the response rather than
-              // guessed at: an anonymous session still yields a full-length token, and the only
-              // place the difference is stated is this body.
-              var reportSession = function (url, response) {
+              // The player's own answer to "am I signed in, with which token, until when?". All three
+              // are in this one reply and nowhere else: an anonymous session still yields a
+              // full-length token, and the token itself is opaque, so it states no expiry.
+              var reportPayload = function (url, response) {
                 try {
                   if (String(url).indexOf('/api/token') === -1) return;
-                  response.clone().json().then(function (body) {
+                  response.clone().text().then(function (body) {
                     try {
-                      if (body && typeof body.isAnonymous === 'boolean') {
-                        $BRIDGE.onSession(body.isAnonymous);
-                      }
+                      $BRIDGE.onTokenPayload(String(body));
                     } catch (e) {}
                   }).catch(function () {});
                 } catch (e) {}
@@ -341,7 +408,7 @@ open class SpotifyBrowserToken(private val context: Context) {
                     url = (input && input.url) ? input.url : String(input);
                   } catch (e) {}
                   return nativeFetch.apply(this, arguments).then(function (response) {
-                    reportSession(url, response);
+                    reportPayload(url, response);
                     return response;
                   });
                 };

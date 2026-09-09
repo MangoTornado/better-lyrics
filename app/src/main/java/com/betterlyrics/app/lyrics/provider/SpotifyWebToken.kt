@@ -233,8 +233,13 @@ object SpotifyWebToken {
             return when (val result = browser.harvest(cookie)) {
                 is SpotifyBrowserToken.Result.Harvested -> {
                     credentials.cachedSpotifyToken = result.token
-                    // Trust the token's own claim; fall back to the hour Spotify actually grants.
-                    val expiresAt = result.expiresAt ?: (System.currentTimeMillis() + 55 * 60_000L)
+                    // The player states the expiry in its token reply, so this is normally the real
+                    // one. The fallback is short on purpose: it used to claim 55 minutes, where a
+                    // measured token had 29, so a dead token counted as fresh for half an hour and
+                    // the warm-up left it alone. Under-guessing costs an extra harvest; over-guessing
+                    // costs every lookup in between.
+                    val expiresAt = result.expiresAt
+                        ?: (System.currentTimeMillis() + FALLBACK_LIFETIME_MS)
                     credentials.cachedSpotifyTokenExpiresAt = expiresAt
                     _harvest.value = HarvestStatus(
                         detail = "Renewed from the cookie",
@@ -302,11 +307,23 @@ object SpotifyWebToken {
     }
 
     /**
+     * How long a harvested token is assumed to last when nothing says.
+     *
+     * Twenty minutes, under the 29 measured from a live token, because the cost of being wrong is
+     * asymmetric: guess short and there is an extra harvest, guess long and every lookup in between
+     * uses a token that has already died. Rarely reached — the player's token reply states the real
+     * expiry.
+     */
+    private const val FALLBACK_LIFETIME_MS = 20 * 60_000L
+
+    /**
      * When a token expires, from its own `exp` claim, or null if it does not say.
      *
-     * Spotify's access tokens are JWTs; the middle segment is base64url JSON. Read rather
-     * than assumed so Settings can show how much time is left, which is the difference
-     * between "this is broken" and "paste a fresh one".
+     * Returns null for Spotify's own access tokens, which are opaque rather than JWTs — measured
+     * against the live player, 403 characters with no `.` in them. Kept for a pasted token, which
+     * is whatever the user copied from wherever, and because a null answer here is handled
+     * everywhere it is asked. The authoritative expiry for a harvested token comes from the
+     * player's token reply instead.
      */
     fun expiryOf(token: String): Long? = runCatching {
         val payload = token.split('.').getOrNull(1) ?: return null

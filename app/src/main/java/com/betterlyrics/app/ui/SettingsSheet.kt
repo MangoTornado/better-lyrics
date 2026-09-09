@@ -60,6 +60,7 @@ import com.betterlyrics.app.ui.components.AppIcons
 import com.betterlyrics.app.settings.TranslationSource
 import com.betterlyrics.app.settings.CacheServerMode
 import com.betterlyrics.app.lyrics.LyricsRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -1178,15 +1179,33 @@ fun SettingsSheet(
                         // Shown rather than hidden: the point of pressing the button is to find out
                         // whether it worked, and a masked field cannot tell you that.
                         harvest.token?.let { token ->
-                            val minutes = harvest.expiresAt
-                                ?.let { (it - System.currentTimeMillis()) / 60_000 }
+                            // Recomputed on a ticker rather than once: the sheet can sit open for
+                            // longer than the token lives, and a number frozen at the moment it was
+                            // drawn is the one thing a countdown must not be.
+                            val expiresAt = harvest.expiresAt
+                            val remaining by produceState(
+                                expiresAt?.minus(System.currentTimeMillis()),
+                                expiresAt,
+                            ) {
+                                while (expiresAt != null) {
+                                    value = expiresAt - System.currentTimeMillis()
+                                    delay(15_000)
+                                }
+                            }
+                            val countdown = remaining?.let { left ->
+                                when {
+                                    left <= 0L -> "\n\nExpired — renew for another."
+                                    left < 60_000L -> "\n\nExpires in under a minute."
+                                    else -> "\n\nExpires in ${left / 60_000} min."
+                                }
+                            }
                             SecretField(
                                 label = "The token it fetched",
                                 help = "Read-only, and kept in memory rather than in the box above " +
                                     "— a token pasted there is treated as your choice and is never " +
                                     "replaced, which would stop the renewal that just produced " +
                                     "this one. Copy it if you want it elsewhere." +
-                                    (minutes?.let { "\n\nExpires in about $it minutes." } ?: ""),
+                                    (countdown ?: ""),
                                 value = token,
                                 accent = accent,
                                 onChange = {},
