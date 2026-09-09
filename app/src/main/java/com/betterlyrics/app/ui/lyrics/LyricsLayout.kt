@@ -428,10 +428,44 @@ object LyricsLayoutBuilder {
         val layoutWords = ArrayList<List<DisplayPiece>>(displayWords.size)
         for (word in displayWords) {
             val width = word.sumOf { (paint.measureText(it.text) + it.leadingGap).toDouble() }
-            // A single piece has no interior boundary to break at: an RTL word is shaped as one run,
-            // and one very long syllable has nowhere to go. Both are left to overflow rather than
-            // broken somewhere that would look like a mistake.
-            if (width <= maxWidth || word.size < 2) {
+            if (width <= maxWidth) {
+                layoutWords += word
+                continue
+            }
+
+            // One piece and no room for it, so the break has to fall inside the piece itself.
+            //
+            // Leaving this case alone was not enough. A whole line can arrive as a *single* syllable
+            // — TTML from the cache server does exactly that for Chinese, where there are no spaces
+            // to split spans on — and then there is no boundary between syllables to use and the
+            // line ran off the screen anyway.
+            //
+            // The window is shared out across the parts in proportion to their length, which is what
+            // `emphasisLetters` already does to make a held syllable light up letter by letter, so
+            // the fill still tracks the singing. RTL is excluded: the run is shaped as a whole and
+            // cutting it would break the joins.
+            if (word.size == 1 && !line.rtl) {
+                val piece = word[0]
+                val parts = wrap(piece.text, paint, maxWidth)
+                if (parts.size > 1) {
+                    val span = (piece.endMs - piece.startMs).coerceAtLeast(0)
+                    val total = piece.text.length.coerceAtLeast(1)
+                    var consumed = 0
+                    for (part in parts) {
+                        val from = piece.startMs + span * consumed / total
+                        consumed += part.length
+                        val to = piece.startMs + span * consumed / total
+                        // No ruby on the parts: a kana gloss is centred over the syllable it reads,
+                        // and there is no honest place to put it once that syllable is in pieces.
+                        layoutWords += listOf(DisplayPiece(part, from, to, 0f, null))
+                    }
+                    continue
+                }
+            }
+
+            if (word.size < 2) {
+                // A single piece that even `wrap` could not divide — one enormous grapheme. Nothing
+                // to be done but let it overflow, which at least looks like the text it is.
                 layoutWords += word
                 continue
             }

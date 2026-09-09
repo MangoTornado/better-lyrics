@@ -125,6 +125,63 @@ class RomanizedWrapTest {
         }
     }
 
+    /**
+     * A whole line as one syllable, which is what TTML from the cache server produces for Chinese:
+     * there are no spaces to split spans on, so the span is the line.
+     */
+    private fun oneSyllableLine(): LyricsDocument {
+        val characters = "字".repeat(syllableCount)
+        val pinyin = List(syllableCount) { "zai" }.joinToString("")
+        return LyricsDocument(
+            kind = LyricsKind.SYLLABLE,
+            lines = listOf(
+                LyricLine(
+                    role = LineRole.LEAD,
+                    startMs = 0,
+                    endMs = 4_000,
+                    text = characters,
+                    syllables = listOf(
+                        Syllable(text = characters, startMs = 0, endMs = 4_000, romanized = pinyin),
+                    ),
+                ),
+            ),
+            providerName = "test",
+            providerId = "test",
+        )
+    }
+
+    @Test
+    fun `a line that is one long syllable is broken rather than left to overflow`() {
+        val layout = LyricsLayoutBuilder.build(
+            document = oneSyllableLine(),
+            metrics = LyricsMetrics(fontSizePx = 10f, simpleMode = false, showSecondaryLine = false),
+            widthPx = widthPx,
+            useRomanization = true,
+            showTranslation = false,
+            showCredits = false,
+        )
+
+        val units = layout.lines[0].units
+        assertTrue("should have been divided", units.size > 1)
+        assertTrue(
+            "runs to ${units.maxOf { it.x + it.width }} in a $column column",
+            units.maxOf { it.x + it.width } <= column + 0.5f,
+        )
+
+        // The syllable's window is shared out in order, so the fill still tracks the singing across
+        // the break rather than restarting or jumping.
+        assertEquals(0, units.first().startMs)
+        assertEquals(4_000, units.last().endMs)
+        for ((earlier, later) in units.zipWithNext()) {
+            assertTrue("${earlier.endMs} then ${later.startMs}", later.startMs >= earlier.startMs)
+        }
+        // And nothing of the text was lost.
+        assertEquals(
+            syllableCount * 3,
+            units.sumOf { it.text.length },
+        )
+    }
+
     @Test
     fun `a line that already fits is left on one row`() {
         val romanized = layout(useRomanization = true, width = 4_000f)
