@@ -41,16 +41,22 @@ class AmllTtmlProvider(private val credentials: ProviderCredentials) : LyricsPro
         withContext(Dispatchers.IO) {
             val base = credentials.amllBaseUrl.trimEnd('/')
 
+            /** Report the identity before returning, whatever the lyrics turn out to be. */
+            fun Entry.reported(): Entry = also { entry ->
+                entry.isrcs.firstOrNull { it.isNotBlank() }
+                    ?.let { request.onIsrc?.invoke(it) }
+            }
+
             request.isrc
                 ?.takeIf { it.isNotBlank() }
                 ?.let { get(base, "isrc=${Http.encode(it)}") }
-                ?.let { return@withContext it.toDocument() }
+                ?.let { return@withContext it.reported().toDocument() }
 
             request.spotifyTrackId
                 ?.let { get(base, "spotifyId=${Http.encode(it)}") }
-                ?.let { return@withContext it.toDocument() }
+                ?.let { return@withContext it.reported().toDocument() }
 
-            searchThenGet(base, request)?.toDocument()
+            searchThenGet(base, request)?.reported()?.toDocument()
         }
 
     /** `/v1/lyrics/get` returns the metadata and the whole TTML in one response. */
@@ -109,6 +115,15 @@ class AmllTtmlProvider(private val credentials: ProviderCredentials) : LyricsPro
         val musicNames: List<String>,
         val artistNames: List<String>,
         val authors: List<String>,
+        /**
+         * The recording's ISRC, which this database carries for nearly everything it holds.
+         *
+         * The reason it matters here rather than anywhere else: this is the only source that gives
+         * one away with no token whatsoever. A phone with nothing configured still learns the
+         * identity of every track it finds lyrics for, and every later lookup of that track — by
+         * Apple, or by this database again — becomes exact.
+         */
+        val isrcs: List<String>,
         val lyrics: String?,
     ) {
         fun score(request: LyricsRequest): Float {
@@ -142,6 +157,7 @@ class AmllTtmlProvider(private val credentials: ProviderCredentials) : LyricsPro
         musicNames = data.strings("musicNames"),
         artistNames = data.strings("artistNames"),
         authors = data.strings("authorUsernames"),
+        isrcs = data.strings("isrcs"),
         lyrics = data["lyrics"]?.jsonPrimitive?.contentOrNull,
     )
 

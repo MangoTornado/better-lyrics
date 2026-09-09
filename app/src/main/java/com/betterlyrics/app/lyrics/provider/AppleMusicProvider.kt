@@ -94,6 +94,7 @@ class AppleMusicProvider(private val credentials: ProviderCredentials) : LyricsP
 
             var bestId: String? = null
             var bestScore = 0f
+            var bestIsrc: String? = null
             for (element in songs) {
                 val song = runCatching { element.jsonObject }.getOrNull() ?: continue
                 val songId = song["id"]?.jsonPrimitive?.contentOrNull ?: continue
@@ -107,9 +108,15 @@ class AppleMusicProvider(private val credentials: ProviderCredentials) : LyricsP
                 if (score > bestScore) {
                     bestScore = score
                     bestId = songId
+                    bestIsrc = attributes["isrc"]?.jsonPrimitive?.contentOrNull
                 }
             }
-            if (bestId != null && bestScore >= Matching.MATCH_THRESHOLD) return bestId
+            if (bestId != null && bestScore >= Matching.MATCH_THRESHOLD) {
+                // Reported before returning, and whether or not the lyrics turn out to exist: the
+                // identity is worth keeping either way, and this was the request that had it.
+                bestIsrc?.takeIf { it.isNotBlank() }?.let { request.onIsrc?.invoke(it) }
+                return bestId
+            }
         }
         return null
     }

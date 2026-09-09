@@ -125,14 +125,21 @@ class LyricsRepository(
 
     // ---- track lifecycle ----------------------------------------------------
 
-    private fun TrackInfo.toRequest(isrc: String? = null) = LyricsRequest(
-        title = title,
-        artist = artist,
-        album = album,
-        durationMs = durationMs,
-        spotifyTrackId = spotifyTrackId,
-        isrc = isrc,
-    )
+    private fun TrackInfo.toRequest(isrc: String? = null): LyricsRequest {
+        val track = this
+        return LyricsRequest(
+            title = title,
+            artist = artist,
+            album = album,
+            durationMs = durationMs,
+            spotifyTrackId = spotifyTrackId,
+            isrc = isrc,
+        ).apply {
+            // Several sources hand one over without being asked, and two of them need no token to
+            // do it — so this is how a phone with nothing configured still ends up matching exactly.
+            onIsrc = { learned -> noteIsrc(track, learned) }
+        }
+    }
 
     /**
      * Tell the repository a track's ISRC, learned from somewhere that knows.
@@ -147,11 +154,18 @@ class LyricsRepository(
         if (!request.isrc.isNullOrBlank()) return
 
         scope.launch {
+            // Written down first and unconditionally. Even when re-asking now is not worth it, the
+            // next play of this track starts from an exact identity — which is most of the value.
             isrcStore.put(track.cacheKey, isrc)
-            // Only worth redoing if a source that indexes on an ISRC is in play and the answer we
-            // have is not already the best kind.
-            val worthRetrying = (base.value as? Base.Ready)?.document?.kind != LyricsKind.SYLLABLE
-            if (!worthRetrying) return@launch
+            // Only worth redoing if the answer we have is not already the best kind. Word-by-word
+            // is as good as it gets, so an ISRC that arrives alongside one — which is the usual
+            // case, since AMLL and Apple are the sources that volunteer it — is simply banked.
+            val ready = base.value as? Base.Ready
+            if (ready == null || ready.document.kind == LyricsKind.SYLLABLE) return@launch
+
+            // And only while this is still the track playing: the lookup takes time, and by now the
+            // listener may have moved on.
+            if (currentRequest?.cacheIdentity() != track.cacheKey) return@launch
             // `freshen`, because the answer already on screen was cached under a key that does not
             // include the ISRC — so re-asking would be served the same fuzzy result straight back
             // out of the cache, and the ISRC would change nothing for thirty days.

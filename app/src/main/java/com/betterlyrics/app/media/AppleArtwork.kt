@@ -17,8 +17,19 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/** Cover and artist images for a track, as Apple has them. */
-data class AppleImages(val coverUrl: String? = null, val artistImageUrl: String? = null)
+/** Cover and artist images for a track, as Apple has them — and the recording's identity. */
+data class AppleImages(
+    val coverUrl: String? = null,
+    val artistImageUrl: String? = null,
+    /**
+     * The ISRC, from the same search that found the artwork.
+     *
+     * Worth taking here as well as in the lyrics provider, because this runs on the developer token
+     * alone: somebody with no Apple subscription — so no syllable lyrics — still learns the identity
+     * of what they are playing, and every later lookup becomes exact.
+     */
+    val isrc: String? = null,
+)
 
 /**
  * Cover art and artist images from the Apple Music catalogue.
@@ -116,9 +127,13 @@ class AppleArtwork(private val credentials: ProviderCredentials) {
             ?.firstOrNull()?.jsonObject
             ?.get("id")?.jsonPrimitive?.contentOrNull
 
+        val isrc = song["attributes"]?.jsonObject
+            ?.get("isrc")?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+
         val artistImage = artistId?.let { artistImage(storefront, it) }
-        return AppleImages(cover, artistImage).takeIf {
-            it.coverUrl != null || it.artistImageUrl != null
+        return AppleImages(cover, artistImage, isrc).takeIf {
+            it.coverUrl != null || it.artistImageUrl != null || it.isrc != null
         }
     }
 

@@ -256,6 +256,8 @@ class AppContainer(context: Context) {
         if (appleArtwork.isAvailable) {
             val images = runCatching { appleArtwork.imagesFor(track) }.getOrNull()
             if (images != null) {
+                // The developer token alone gets this, so it works without a subscription.
+                images.isrc?.let { lyrics.noteIsrc(track, it) }
                 val cover = images.coverUrl?.let { url ->
                     runCatching { appleArtwork.image(url, APPLE_IMAGE_SIZE) }.getOrNull()
                 }

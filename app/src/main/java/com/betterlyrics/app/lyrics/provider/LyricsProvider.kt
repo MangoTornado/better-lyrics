@@ -31,6 +31,20 @@ data class LyricsRequest(
      */
     val isrc: String? = null,
 ) {
+    /**
+     * Where a provider puts an ISRC it found while answering.
+     *
+     * Several of them hand one over without being asked: the community database indexes every song
+     * against every service, and Apple returns it on the song. Dropping that was leaving the most
+     * useful field in the response on the floor — and unlike Spotify's, these arrive with no token
+     * at all.
+     *
+     * A body property rather than a constructor one on purpose: a data class excludes those from
+     * `equals`, so carrying a callback around cannot quietly change what counts as the same
+     * request.
+     */
+    var onIsrc: ((String) -> Unit)? = null
+
     val durationSeconds: Int get() = (durationMs / 1000).toInt()
 
     /**
