@@ -104,7 +104,13 @@ class NeteaseProvider(private val credentials: ProviderCredentials) : LyricsProv
                     bestScore = score
                     bestId = id
                 }
-                if (score > bestOverall) {
+                // `bestTitle == null` as well as a higher score, because a score of exactly zero is
+                // now reachable: a candidate whose artist contradicts the request is vetoed outright
+                // rather than scored down. With `score > bestOverall` alone, every candidate being
+                // rejected left the diagnostic reading `closest "null" at 0%` — which is the one
+                // case where naming the candidate matters most, since seeing the wrong artist in it
+                // is what explains the rejection.
+                if (bestTitle == null || score > bestOverall) {
                     bestOverall = score
                     bestTitle = if (artists.isEmpty()) name else "$name — ${artists.first()}"
                 }

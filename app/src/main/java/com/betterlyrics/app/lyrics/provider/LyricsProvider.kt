@@ -332,6 +332,15 @@ object Http {
 object Matching {
     const val MATCH_THRESHOLD = 0.62f
 
+    /**
+     * Below this, two comparable artist names are describing different people.
+     *
+     * A veto rather than a low score, because a low score does not lose: an exact title and an
+     * unknown duration reach 0.60 between them, so a contradicting artist weighted at 30% still
+     * cleared the threshold. The same value the server uses, for the same reason.
+     */
+    const val ARTIST_CONTRADICTION = 0.35f
+
     fun score(
         request: LyricsRequest,
         candidateTitle: String,
@@ -342,6 +351,7 @@ object Matching {
             similarity(request.title, candidateTitle),
             similarity(request.cleanTitle, cleanTrackTitle(candidateTitle)),
         )
+        var artistContradicts = false
         val artistScore = when {
             request.artist.isBlank() || candidateArtist.isBlank() -> 0.5f
 
@@ -356,8 +366,27 @@ object Matching {
                 similarity(request.artist, candidateArtist),
                 similarity(request.primaryArtist, candidateArtist),
                 if (candidateArtist.containsFold(request.primaryArtist)) 1f else 0f,
-            )
+                // Every credited artist gets a look, because catalogues disagree about who
+                // "the" artist is on a collaboration. Needed here rather than optional: the
+                // veto below is absolute, so it must not fire on a real match that happens
+                // to credit the other name.
+                request.allArtists.maxOfOrNull { one -> similarity(one, candidateArtist) } ?: 0f,
+            ).also { artistContradicts = it < ARTIST_CONTRADICTION }
         }
+
+        // Two comparable names sharing almost nothing are not a weak signal, they are a
+        // different artist — and at 30% of the score a flat contradiction did not lose.
+        //
+        // The case that found this: the AMLL database has nothing for `Mirror` by Ado, so the
+        // title-and-artist search returns empty and the fallback asks by title alone — which
+        // returns Porter Robinson's `Mirror`. An exact title is 0.5, an unknown duration
+        // abstains for another 0.1, and any scrap of artist similarity clears the 0.62
+        // threshold at 0.63. The wrong words then look exactly like the right ones.
+        //
+        // What this deliberately does not catch is an absent artist, or one written in another
+        // script. Both score 0.5 above, because they are an absence of evidence rather than
+        // evidence against.
+        if (artistContradicts) return 0f
         val durationScore = when {
             request.durationMs <= 0 || candidateDurationMs <= 0 -> 0.5f
             else -> {
