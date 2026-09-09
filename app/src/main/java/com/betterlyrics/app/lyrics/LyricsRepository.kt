@@ -465,7 +465,12 @@ class LyricsRepository(
 
             // Strictly better only. An equal answer is churn: it would rewrite the cache and could
             // swap the words on screen for no gain the reader can see.
-            if (better == null || qualityScore(better) <= qualityScore(cached.document)) {
+            // Both judged against the same yardstick, which has to include the answer already held:
+            // otherwise a fragment looks complete simply because it arrived alone.
+            val bestLines = maxOf(lineCount(cached.document), better?.let { lineCount(it) } ?: 0)
+            if (better == null ||
+                qualityScore(better, bestLines) <= qualityScore(cached.document, bestLines)
+            ) {
                 // The document is unchanged, but these sources have now been asked — and recording
                 // that is the whole point, or every play would ask them again.
                 cache.put(key, cached.document, outcomes, cached.savedAtMs)
@@ -527,7 +532,10 @@ class LyricsRepository(
         }
 
         return Upgrade(
-            document = results.mapNotNull { it.document }.maxByOrNull { qualityScore(it) },
+            document = results.mapNotNull { it.document }.let { found ->
+                val bestLines = found.maxOfOrNull { lineCount(it) } ?: 0
+                found.maxByOrNull { qualityScore(it, bestLines) }
+            },
             outcomes = results.associate { answer ->
                 answer.id to when {
                     answer.failed -> LyricsCache.Outcome.FAILED
@@ -622,6 +630,11 @@ class LyricsRepository(
             return Query.Broke(e.message ?: "Lookup failed")
         }
 
+        val answers = results.mapNotNull { (id, document) -> document?.let { id to it } }
+        // The fullest answer anybody found, which is the yardstick for the rest: a fragment can only
+        // be recognised as one by comparison with something whole.
+        val bestLines = answers.maxOfOrNull { (_, document) -> lineCount(document) } ?: 0
+
         return Query.Answered(
             provisional = results.any { it.failed },
             outcomes = results.associate { answer ->
@@ -631,10 +644,10 @@ class LyricsRepository(
                     else -> LyricsCache.Outcome.NONE
                 }
             },
-            document = results.mapNotNull { (id, document) -> document?.let { id to it } }
+            document = answers
                 .maxWithOrNull(
                     compareBy(
-                        { (_, document) -> qualityScore(document) },
+                        { (_, document) -> qualityScore(document, bestLines) },
                         // Earlier in the user's order wins a tie. A provider that is not
                         // in that order at all — the cache server — is not last by
                         // accident of `indexOf` returning -1; it is first on purpose,
@@ -648,21 +661,6 @@ class LyricsRepository(
         )
     }
 
-    /**
-     * Which of several results to show. Word timings beat line timings beat no
-     * timings; within a tier, a result that ships its own romanization or translation
-     * beats one we would have to generate.
-     */
-    private fun qualityScore(document: LyricsDocument): Int {
-        val tier = when (document.kind) {
-            LyricsKind.SYLLABLE -> 100
-            LyricsKind.LINE -> 50
-            LyricsKind.STATIC -> 10
-        }
-        val extras = (if (document.hasRomanization) 3 else 0) +
-            (if (document.hasTranslation) 2 else 0)
-        return tier + extras
-    }
 
     // ---- presentation -------------------------------------------------------
 
@@ -803,6 +801,23 @@ class LyricsRepository(
          * enough that a token fixed this morning is used this afternoon.
          */
         val RETRY_FAILED_MS = TimeUnit.HOURS.toMillis(6)
+
+        /**
+         * How many of a document's own lines must carry syllables for it to count as word-timed.
+         *
+         * `kind` is set from *any* word timing at all, so without this three timed lines out of forty
+         * made a whole document syllable-tier and it beat a complete line-synced answer outright.
+         */
+        const val MIN_SYLLABLE_COVERAGE = 0.5f
+
+        /**
+         * How much of the fullest answer a document must have before its timings are trusted.
+         *
+         * The same 0.6 the server'''s merge uses to decide whether a candidate may be the timing
+         * spine, against the same failure: a tenth of the words with perfect timings is a truncated
+         * transcription or the wrong recording, not a better answer.
+         */
+        const val MIN_COMPLETENESS = 0.6f
     }
 }
 
@@ -823,6 +838,66 @@ class LyricsRepository(
  * settings object will actually hit is exactly the sort of thing that is easy to get
  * subtly wrong and impossible to notice.
  */
+/**
+ * Which of several results to show. Word timings beat line timings beat no
+ * timings; within a tier, a result that ships its own romanization or translation
+ * beats one we would have to generate.
+ */
+internal fun qualityScore(document: LyricsDocument, bestLines: Int = 0): Int {
+    val tier = when (effectiveKind(document, bestLines)) {
+        LyricsKind.SYLLABLE -> 100
+        LyricsKind.LINE -> 50
+        LyricsKind.STATIC -> 10
+    }
+    // Within a tier, the more of the song the better. Capped below the gap between tiers, so
+    // completeness orders equals and never outranks a real difference in timing.
+    val completeness = if (bestLines <= 0) {
+        9
+    } else {
+        (9f * document.vocalLines.size / bestLines).toInt().coerceIn(0, 9)
+    }
+    val extras = (if (document.hasRomanization) 3 else 0) +
+        (if (document.hasTranslation) 2 else 0)
+    return tier + completeness + extras
+}
+
+/**
+ * The tier a document really belongs in, which is not always the one it claims.
+ *
+ * Two ways a document called word-timed is not word-timed *for this song*, and both used to beat
+ * a complete line-synced answer outright, because the tier was read straight off `kind` and
+ * nothing looked at how much of the song was covered:
+ *
+ * - **Barely any of its own lines carry syllables.** `kind` is set from *any* word timing at all —
+ *   see `TtmlParser` — so three word-timed lines out of forty made the whole document
+ *   syllable-tier. It is a line-timed document with a few timed lines in it, and scoring it as
+ *   the best thing available is how a full transcription lost to a fragment.
+ * - **It has far fewer lines than another source found.** A tenth of the words with perfect
+ *   timings is a truncated transcription or the wrong recording, not a better answer.
+ *
+ * Either way it drops to the line tier, where completeness decides — so a genuine word-timed
+ * document still beats every line-timed one, which is the property worth keeping. The 0.6
+ * threshold is the one the server's merge uses to decide whether a candidate may be the timing
+ * spine, for the same reason and against the same failure.
+ */
+internal fun effectiveKind(document: LyricsDocument, bestLines: Int): LyricsKind {
+    if (document.kind != LyricsKind.SYLLABLE) return document.kind
+
+    val vocal = document.vocalLines
+    if (vocal.isEmpty()) return LyricsKind.STATIC
+
+    val timed = vocal.count { it.syllables.isNotEmpty() }
+    if (timed.toFloat() / vocal.size < LyricsRepository.MIN_SYLLABLE_COVERAGE) return LyricsKind.LINE
+
+    if (bestLines > 0 && vocal.size.toFloat() / bestLines < LyricsRepository.MIN_COMPLETENESS) {
+        return LyricsKind.LINE
+    }
+    return LyricsKind.SYLLABLE
+}
+
+/** How much of the song a document has words for, ignoring the interludes we generate. */
+internal fun lineCount(document: LyricsDocument): Int = document.vocalLines.size
+
 /**
  * Which of [candidates] never got to answer about a track that is already cached.
  *
