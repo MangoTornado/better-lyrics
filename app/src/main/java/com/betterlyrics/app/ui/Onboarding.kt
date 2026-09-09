@@ -103,7 +103,11 @@ fun WelcomeSheet(
                     "playhead — as a “media session”, and that is what the lyrics sync to. " +
                     "Reading it sits behind the notification-access switch. Without it the " +
                     "app cannot see anything at all.\n\nNothing leaves your phone except a " +
-                    "track title and artist, and only to look lyrics up.",
+                    "track title and artist, and only to look lyrics up. Notifications " +
+                    "themselves are never read — but they are delivered, which keeps the app " +
+                    "running, so it hands the permission back after ten minutes with nothing " +
+                    "playing and picks it up again when you open it. Settings → Battery if you " +
+                    "want that sooner, later or never.",
                 accent = accent,
                 done = permissionGranted,
             )

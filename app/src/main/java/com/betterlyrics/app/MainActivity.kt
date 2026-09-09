@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import com.betterlyrics.app.media.MediaNotificationListener
 
 class MainActivity : ComponentActivity() {
 
@@ -109,7 +110,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // The permission may have been granted while we were in the background, and the
+        container.uiVisible = true
+        // Ask for the notification listener back. It may have been stood down while nothing was
+        // playing — see MediaNotificationListener — and nothing rebinds it on its own. Rebinding is
+        // asynchronous, so the first read of the sessions can still fail; the retry backoff in
+        // MediaSessionRepository is what covers that, and was written for the same situation after
+        // the permission is first granted.
+        MediaNotificationListener.rebind(this)
+        // The permission may also have been granted while we were in the background, and the
         // listener service is only bound after that happens.
         container.media.refresh()
         container.media.start()
@@ -125,7 +133,10 @@ class MainActivity : ComponentActivity() {
      */
     override fun onStop() {
         super.onStop()
-        if (!isInPictureInPictureMode) container.media.stop()
+        // A floating window is still on screen, so it still counts as visible and still watches.
+        if (isInPictureInPictureMode) return
+        container.uiVisible = false
+        container.media.stop()
     }
 
     override fun onResume() {

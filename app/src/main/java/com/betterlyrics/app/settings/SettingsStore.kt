@@ -237,6 +237,20 @@ data class Settings(
     val appleMusicUserToken: String? = null,
     val appleStorefront: String = "us",
 
+    // ---- background --------------------------------------------------------
+    /**
+     * Minutes of nothing playing, with the app off screen, before it stops watching. 0 never does.
+     *
+     * Reading what is playing requires an enabled notification listener, and an enabled listener is
+     * a bound service: Android keeps the process resident and delivers every notification on the
+     * device to it, whether or not anything is playing. That is why the app appeared never to close.
+     * Standing the listener down gives the process back.
+     *
+     * The cost, stated plainly because it is real: while stood down the app cannot see a track
+     * starting. Opening it starts watching again.
+     */
+    val backgroundTimeoutMinutes: Int = 10,
+
     // ---- updates ----------------------------------------------------------
     /**
      * Look for a new release on launch, at most every few hours.
@@ -455,6 +469,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         appleMusicUserToken = secrets.trimmed(KEY_APPLE_USER_TOKEN),
         appleStorefront = prefs.trimmed(KEY_APPLE_STOREFRONT) ?: "us",
 
+        backgroundTimeoutMinutes = prefs.getInt(KEY_BACKGROUND_TIMEOUT, 10),
         autoUpdateCheck = prefs.getBoolean(KEY_AUTO_UPDATE, true),
         lastUpdateCheckAt = prefs.getLong(KEY_UPDATE_CHECKED_AT, 0L),
         skippedUpdateVersion = prefs.trimmed(KEY_UPDATE_SKIPPED),
@@ -664,6 +679,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_NETEASE_URL, value?.trim()?.trimEnd('/'))
     }
 
+    fun setBackgroundTimeoutMinutes(value: Int) = edit {
+        putInt(KEY_BACKGROUND_TIMEOUT, value.coerceIn(0, 24 * 60))
+    }
+
     fun setAutoUpdateCheck(value: Boolean) = edit { putBoolean(KEY_AUTO_UPDATE, value) }
 
     fun noteUpdateCheck(at: Long) = edit { putLong(KEY_UPDATE_CHECKED_AT, at) }
@@ -838,6 +857,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_LRCLIB_URL = "lrclib_url"
         const val KEY_NETEASE_URL = "netease_url"
         const val KEY_AMLL_URL = "amll_url"
+        const val KEY_BACKGROUND_TIMEOUT = "background_timeout_minutes"
         const val KEY_AUTO_UPDATE = "auto_update_check"
         const val KEY_UPDATE_CHECKED_AT = "update_checked_at"
         const val KEY_UPDATE_SKIPPED = "update_skipped_version"

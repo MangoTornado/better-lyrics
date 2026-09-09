@@ -43,6 +43,8 @@ import com.betterlyrics.app.media.CacheServerExtras
 import com.betterlyrics.app.media.ExtrasStore
 import com.betterlyrics.app.media.IsrcStore
 import com.betterlyrics.app.media.ServerSource
+import com.betterlyrics.app.media.MediaNotificationListener
+import kotlinx.coroutines.delay
 
 /**
  * Hand-rolled container instead of a DI framework: there are eight objects, they are
@@ -127,7 +129,61 @@ class AppContainer(context: Context) {
     /** How much disk the cached lyrics take, for the settings screen. */
     suspend fun lyricsCacheSizeBytes(): Long = cache.sizeBytes()
 
+    /**
+     * Whether any of the app's own windows are on screen. Set by the activity.
+     *
+     * Part of the idle test rather than the whole of it: the app should keep watching while it is
+     * open with nothing playing, and while something is playing with the app closed. It is only both
+     * at once — closed *and* silent — that there is nothing to watch for.
+     */
+    @Volatile
+    var uiVisible: Boolean = false
+        set(value) {
+            field = value
+            if (value) lastActivityAt = System.currentTimeMillis()
+        }
+
+    @Volatile
+    private var lastActivityAt = System.currentTimeMillis()
+
+    /**
+     * Release the notification listener once there has been nothing to watch for a while.
+     *
+     * The reason this is needed at all: an enabled notification listener is a bound service, so
+     * Android keeps the process resident and hands it every notification on the device — a wake-up
+     * per notification, from every app, indefinitely. An app the user finished with hours ago has no
+     * business doing that, and it is why this one never appeared to close.
+     *
+     * Checked on a slow tick rather than driven by events, because the condition is "nothing has
+     * happened for a while" and there is no event for that. A minute of granularity on a timeout
+     * measured in tens of minutes costs nothing.
+     */
+    private suspend fun watchForIdle() {
+        while (true) {
+            delay(IDLE_CHECK_INTERVAL_MS)
+
+            val timeout = settings.current.backgroundTimeoutMinutes
+            val playing = media.snapshot.value.playback.isPlaying
+            if (timeout <= 0 || playing || uiVisible) {
+                lastActivityAt = System.currentTimeMillis()
+                continue
+            }
+            if (!MediaNotificationListener.isBound) continue
+
+            val idleFor = System.currentTimeMillis() - lastActivityAt
+            if (idleFor < timeout * 60_000L) continue
+
+            // Let go of everything that was keeping this process awake. What remains has no bound
+            // service and no window, which makes it an empty background process: no callbacks, no
+            // wake-ups, and first in line when the system wants the memory back.
+            media.stop()
+            MediaNotificationListener.standDown()
+        }
+    }
+
     init {
+        scope.launch { watchForIdle() }
+
         // The only place with both a Context and the settings. Installed unconditionally; whether it
         // ever runs is decided per call by `spotifyBrowserTokenEnabled`.
         SpotifyWebToken.harvester = SpotifyBrowserToken(context)
@@ -389,6 +445,11 @@ class AppContainer(context: Context) {
         // And only if it is actually an improvement on what the player gave us.
         if (minOf(found.width, found.height) <= inputs.playerArtworkSize) return
         _searchedArtwork.value = found
+    }
+
+    private companion object {
+        /** A minute. The timeout it serves is measured in tens of them. */
+        const val IDLE_CHECK_INTERVAL_MS = 60_000L
     }
 }
 

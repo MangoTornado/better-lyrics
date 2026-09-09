@@ -138,6 +138,20 @@ private val PROVIDER_INFO = mapOf(
     ),
 )
 
+/**
+ * How long to keep watching with nothing playing.
+ *
+ * Ten minutes by default: long enough to survive the gap between two songs, a phone call or a look
+ * at something else, and short enough that an app finished with in the morning is not still resident
+ * at lunchtime.
+ */
+private val BACKGROUND_TIMEOUTS = listOf(
+    2 to "2 min",
+    10 to "10 min",
+    30 to "30 min",
+    0 to "Never",
+)
+
 /** A short, practical list rather than every language ML Kit supports. */
 private val TRANSLATION_TARGETS = listOf(
     "en" to "English", "es" to "Spanish", "fr" to "French", "de" to "German",
@@ -907,6 +921,44 @@ fun SettingsSheet(
                     subtitle = "Drops it from the cache and asks every source afresh",
                     accent = accent,
                     onClick = { container.lyrics.retry() },
+                )
+            }
+
+            Section(
+                title = "Battery",
+                subtitle = "When to stop watching in the background",
+                open = openSection == "battery",
+                accent = accent,
+                onToggle = { openSection = if (openSection == "battery") null else "battery" },
+            ) {
+                ChipGroup(
+                    label = "Stop watching after",
+                    options = BACKGROUND_TIMEOUTS,
+                    selected = settings.backgroundTimeoutMinutes,
+                    accent = accent,
+                    perRow = 4,
+                    onSelect = { store.setBackgroundTimeoutMinutes(it) },
+                )
+                Hint(
+                    when (val minutes = settings.backgroundTimeoutMinutes) {
+                        0 -> "Never stops. Watches for a track until you turn the permission off."
+                        else -> "After $minutes minutes with nothing playing and the app off " +
+                            "screen, it lets go and stops using power."
+                    },
+                )
+                Help(
+                    "Reading what is playing needs notification access, and an enabled " +
+                        "notification listener is a bound service: Android keeps this app's " +
+                        "process resident and hands it every notification on the device — a " +
+                        "wake-up for each one, from every app, whether or not any music is " +
+                        "playing. That is why closing the app from the recent-apps screen did not " +
+                        "appear to close it, and why it could warm the phone hours " +
+                        "later.\n\nWhen the timer runs out the app gives that binding back. " +
+                        "Nothing then keeps the process alive, so the system reclaims it, and " +
+                        "there is nothing left running to wake up.\n\nThe cost, plainly: while " +
+                        "stopped it cannot notice a track starting, so lyrics will not be waiting " +
+                        "for you. Opening the app starts it watching again immediately. Music " +
+                        "already playing always keeps it awake, however long the timer.",
                 )
             }
 
