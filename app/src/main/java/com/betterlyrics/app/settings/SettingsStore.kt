@@ -226,6 +226,28 @@ data class Settings(
     val enabledProviders: Set<String> = DEFAULT_ENABLED_PROVIDERS,
     val providerOrder: List<String> = DEFAULT_PROVIDER_ORDER,
 
+    /**
+     * Players whose sessions to ignore, by package name.
+     *
+     * The app follows every media session on the device except its own, which is right for a music
+     * player and wrong for everything else that publishes one: a video, a podcast, a browser tab. Those
+     * arrive shaped exactly like a track — a title, an artist, a duration — get looked up, and land in
+     * the cache as songs that do not exist.
+     *
+     * Empty by default. Nothing is guessed at from the package name or the metadata: a long duration and
+     * "Official Video" in the title describe a great many real songs, and silently ignoring a player
+     * would be a worse failure than a cluttered cache, because it looks like the app is broken.
+     */
+    val ignoredPlayers: Set<String> = emptySet(),
+
+    /**
+     * Every player that has published a session, by package name, with the label to show for it.
+     *
+     * Remembered so the list in Settings has something in it: a player is only visible while it holds a
+     * session, and "turn off the app that polluted your cache yesterday" needs it to be listed today.
+     */
+    val seenPlayers: Map<String, String> = emptyMap(),
+
     // ---- credentials and endpoints ---------------------------------------
     val spDcCookie: String? = null,
     val musixmatchUserToken: String? = null,
@@ -451,6 +473,15 @@ class SettingsStore(context: Context) : ProviderCredentials {
         prefetchNextTrack = prefs.getBoolean(KEY_PREFETCH_NEXT, true),
         enabledProviders = prefs.getStringSet(KEY_PROVIDERS_ON, null)
             ?: Settings.DEFAULT_ENABLED_PROVIDERS,
+        ignoredPlayers = prefs.getStringSet(KEY_PLAYERS_IGNORED, null).orEmpty(),
+        seenPlayers = prefs.getStringSet(KEY_PLAYERS_SEEN, null).orEmpty()
+            .mapNotNull { entry ->
+                // `package\u0000label`, because a label can contain anything a developer typed and a
+                // separator that cannot appear in either half is the only kind worth using.
+                val at = entry.indexOf('\u0000')
+                if (at <= 0) null else entry.take(at) to entry.substring(at + 1)
+            }
+            .toMap(),
         providerOrder = prefs.getString(KEY_PROVIDER_ORDER, null)
             ?.split(',')?.filter { it.isNotBlank() }
             ?.let { stored ->
@@ -655,6 +686,33 @@ class SettingsStore(context: Context) : ProviderCredentials {
         putString(KEY_PROVIDER_ORDER, order.joinToString(","))
     }
 
+    // ---- which players to follow --------------------------------------------
+
+    fun setPlayerIgnored(packageName: String, ignored: Boolean) = edit {
+        val next = current.ignoredPlayers.toMutableSet()
+        if (ignored) next += packageName else next -= packageName
+        putStringSet(KEY_PLAYERS_IGNORED, next)
+    }
+
+    /**
+     * Records that a player exists, so Settings can offer it.
+     *
+     * Called from the session watcher, which means every session change — so it writes only when
+     * something is actually new. A preference commit per media event would be a write on every pause.
+     */
+    fun notePlayerSeen(packageName: String, label: String) {
+        if (packageName.isBlank()) return
+        if (current.seenPlayers[packageName] == label) return
+        edit {
+            val next = current.seenPlayers.toMutableMap()
+            next[packageName] = label
+            putStringSet(KEY_PLAYERS_SEEN, next.map { (pkg, name) -> "$pkg\u0000$name" }.toSet())
+        }
+    }
+
+    /** Forgets the list, for when it has filled up with players long since uninstalled. */
+    fun forgetSeenPlayers() = edit { remove(KEY_PLAYERS_SEEN) }
+
     // ---- credentials --------------------------------------------------------
 
     /** Like [edit], but writing to the file backup is told to skip. */
@@ -839,6 +897,8 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_PREFETCH_NEXT = "prefetch_next"
         const val KEY_PROVIDERS_ON = "providers_enabled"
         const val KEY_PROVIDER_ORDER = "provider_order"
+        const val KEY_PLAYERS_IGNORED = "players_ignored"
+        const val KEY_PLAYERS_SEEN = "players_seen"
 
         /**
          * The file the credential keys live in. Named in `backup_rules.xml` and

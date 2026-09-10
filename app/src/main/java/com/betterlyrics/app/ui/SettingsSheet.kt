@@ -644,6 +644,46 @@ fun SettingsSheet(
             }
 
             Section(
+                title = "Players to follow",
+                subtitle = "Which apps count as music",
+                open = openSection == "players",
+                accent = accent,
+                onToggle = { openSection = if (openSection == "players") null else "players" },
+            ) {
+
+                Hint(
+                    "Anything that plays audio publishes the same kind of notification a music player " +
+                        "does — a title, an artist, a length — so a video, a podcast or a browser tab " +
+                        "arrives looking exactly like a song, gets looked up, and fills the cache with " +
+                        "tracks that do not exist. Turn one off here and it is ignored entirely.",
+                )
+
+                val players = settings.seenPlayers.entries.sortedBy { it.value.lowercase() }
+                if (players.isEmpty()) {
+                    Hint("Nothing yet. Play something and the app that played it appears here.")
+                } else {
+                    for ((packageName, label) in players) {
+                        ToggleRow(
+                            title = label,
+                            subtitle = packageName,
+                            checked = packageName !in settings.ignoredPlayers,
+                            accent = accent,
+                            // Stored the other way round — an ignore list rather than an allow list —
+                            // so a player nobody has an opinion about is followed. Anything else would
+                            // mean a new music app silently doing nothing until it was found in here.
+                            onCheckedChange = { store.setPlayerIgnored(packageName, !it) },
+                        )
+                    }
+                    ActionRow(
+                        title = "Forget this list",
+                        subtitle = "Clears the names above; they come back as each app plays again",
+                        accent = accent,
+                        onClick = { store.forgetSeenPlayers() },
+                    )
+                }
+            }
+
+            Section(
                 title = "Language",
                 subtitle = "Romanization, furigana, translation",
                 open = openSection == "language",

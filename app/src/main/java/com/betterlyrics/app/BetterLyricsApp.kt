@@ -57,7 +57,7 @@ class AppContainer(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val settings = SettingsStore(context)
-    val media = MediaSessionRepository(context)
+    val media = MediaSessionRepository(context, settings)
 
     private val cache = LyricsCache(context)
     private val romanizer = Romanizer()
@@ -224,6 +224,15 @@ class AppContainer(context: Context) {
         // lookup finds it dead. A harvest takes the best part of a minute, so noticing at the moment
         // of use is always too late: the lookup that notices is the lookup that fails.
         SpotifyWebToken.keepFresh(settings)
+
+        // Turning a player off has to take effect now, not at the next track change — which for the
+        // only player on the device could be never.
+        scope.launch {
+            settings.settings
+                .map { it.ignoredPlayers }
+                .distinctUntilChanged()
+                .collect { media.republish() }
+        }
 
         // The whole app in one line: whatever the phone is playing decides what we look up.
         scope.launch {

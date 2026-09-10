@@ -2,6 +2,7 @@ package com.betterlyrics.app.media
 
 import android.content.ComponentName
 import android.content.Context
+import com.betterlyrics.app.settings.SettingsStore
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import kotlinx.coroutines.CoroutineScope
@@ -32,7 +33,17 @@ import kotlinx.coroutines.flow.asStateFlow
  * Spotify (or YouTube Music, or Apple Music, or a local player) publishes a
  * `MediaSession`; once the user grants notification access we can read it.
  */
-class MediaSessionRepository(private val context: Context) {
+class MediaSessionRepository(
+    private val context: Context,
+    /**
+     * Consulted for which players to follow, and told about the ones it has seen.
+     *
+     * The alternative was filtering further downstream, but a session that is going to be ignored
+     * should not be watched at all — an ignored player's notifications would otherwise still drive
+     * every republish on the device.
+     */
+    private val settings: SettingsStore,
+) {
 
     private val handler = Handler(Looper.getMainLooper())
     private val listenerComponent =
@@ -139,6 +150,12 @@ class MediaSessionRepository(private val context: Context) {
     private fun rebind(controllers: List<MediaController>) {
         val incoming = controllers.filter { it.packageName != context.packageName }
 
+        // Every player that turns up gets remembered, including the ones being ignored — a list you
+        // cannot see is a list you cannot change your mind about.
+        for (controller in incoming) {
+            settings.notePlayerSeen(controller.packageName, appLabel(controller.packageName))
+        }
+
         // Drop watchers for sessions that went away.
         val gone = watched.keys.filter { existing -> incoming.none { it.sameSession(existing) } }
         gone.forEach { watched.remove(it)?.detach() }
@@ -159,6 +176,16 @@ class MediaSessionRepository(private val context: Context) {
         sessionToken == other.sessionToken
 
     /**
+     * Re-runs the choice of session, for when the settings changed rather than the sessions did.
+     *
+     * Without this, turning a player off left whatever it was playing on screen until something else
+     * happened — which, if it was the only player, could be a long time.
+     */
+    fun republish() {
+        publish()
+    }
+
+    /**
      * Decide which session the lyrics should follow, then publish it.
      *
      * Preference order: something that is playing right now, then whatever played
@@ -167,7 +194,12 @@ class MediaSessionRepository(private val context: Context) {
      * silent video session that happens to exist.
      */
     private fun publish() {
-        val candidates = watched.keys.filter { it.hasUsableMetadata() }
+        // Read per publish rather than held: switching a player off in Settings should take effect on
+        // the next thing that happens, without wiring an observer through to here.
+        val ignored = settings.current.ignoredPlayers
+        val candidates = watched.keys.filter {
+            it.hasUsableMetadata() && it.packageName !in ignored
+        }
         if (candidates.isEmpty()) {
             selected = null
             _snapshot.value = PlayerSnapshot()
