@@ -50,6 +50,7 @@ import com.betterlyrics.app.media.ServerSource
 import com.betterlyrics.app.media.MediaNotificationListener
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -220,8 +221,15 @@ class AppContainer(context: Context) {
             //
             // What remains has no bound service and no window, which makes it an empty background
             // process: no callbacks, no wake-ups, and first in line when the system wants memory.
-            media.stop()
-            MediaNotificationListener.standDown()
+            //
+            // On the main thread, and both together: this loop runs on a background dispatcher,
+            // where letting go of the sessions means clearing a map that the framework's callbacks
+            // are writing to on the main one. Doing it here rather than leaning on the repository's
+            // own hop also keeps the order — detach the callbacks, then release the binding.
+            withContext(Dispatchers.Main) {
+                media.stop()
+                MediaNotificationListener.standDown()
+            }
         }
     }
 

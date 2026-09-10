@@ -32,6 +32,15 @@ import kotlinx.coroutines.flow.asStateFlow
  * This is what makes the app standalone: no Spotify login, no Web API, no account.
  * Spotify (or YouTube Music, or Apple Music, or a local player) publishes a
  * `MediaSession`; once the user grants notification access we can read it.
+ *
+ * **Everything inside runs on the main thread.** The state here — the watched controllers, when each
+ * last played, which one is selected — is reached from framework callbacks, and those are delivered
+ * on the main looper because that is the handler we register with. Nothing is synchronised, so a
+ * caller from anywhere else would be iterating the same map another thread is inserting into: a
+ * `ConcurrentModificationException` in the middle of a track change, or a snapshot assembled from
+ * two different moments. The public methods therefore hop to the main thread themselves rather than
+ * trusting every caller to know, which is what a settings collector on a background dispatcher did
+ * not.
  */
 class MediaSessionRepository(
     private val context: Context,
@@ -81,6 +90,17 @@ class MediaSessionRepository(
             rebind(controllers.orEmpty())
         }
 
+    /**
+     * Run on the main thread: now if we are already there, otherwise as soon as it is free.
+     *
+     * Inline when possible rather than always posting, so a call from the UI keeps happening in the
+     * same frame — the transport buttons and `onStart` depend on that, and a posted `start()` would
+     * leave the first read of the sessions until after the activity had drawn.
+     */
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == handler.looper) block() else handler.post(block)
+    }
+
     fun isPermissionGranted(): Boolean =
         NotificationManagerCompat.getEnabledListenerPackages(context)
             .contains(context.packageName)
@@ -88,10 +108,10 @@ class MediaSessionRepository(
     fun notificationAccessIntent() =
         android.content.Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
 
-    fun start() {
+    fun start() = onMain {
         val granted = isPermissionGranted()
         _permissionGranted.value = granted
-        if (!granted || started || sessionManager == null) return
+        if (!granted || started || sessionManager == null) return@onMain
 
         started = true
         try {
@@ -120,8 +140,8 @@ class MediaSessionRepository(
         handler.postDelayed({ if (!started) start() }, delay)
     }
 
-    fun stop() {
-        if (!started) return
+    fun stop() = onMain {
+        if (!started) return@onMain
         started = false
         runCatching { sessionManager?.removeOnActiveSessionsChangedListener(activeSessionsListener) }
         watched.values.forEach { it.detach() }
@@ -130,13 +150,13 @@ class MediaSessionRepository(
     }
 
     /** Call from `onResume`: picks up a permission that was granted while we were away. */
-    fun refresh() {
+    fun refresh() = onMain {
         val granted = isPermissionGranted()
         _permissionGranted.value = granted
         if (!granted) {
             stop()
             _snapshot.value = PlayerSnapshot()
-            return
+            return@onMain
         }
         if (!started) {
             // Coming back from the settings screen: allow a fresh round of retries.
@@ -181,9 +201,7 @@ class MediaSessionRepository(
      * Without this, turning a player off left whatever it was playing on screen until something else
      * happened — which, if it was the only player, could be a long time.
      */
-    fun republish() {
-        publish()
-    }
+    fun republish() = onMain { publish() }
 
     /**
      * Decide which session the lyrics should follow, then publish it.
@@ -389,8 +407,8 @@ class MediaSessionRepository(
 
     // ---- transport controls -------------------------------------------------
 
-    fun togglePlayPause() {
-        val controller = selected ?: return
+    fun togglePlayPause() = onMain {
+        val controller = selected ?: return@onMain
         if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) {
             controller.transportControls.pause()
         } else {
@@ -398,12 +416,12 @@ class MediaSessionRepository(
         }
     }
 
-    fun skipNext() = selected?.transportControls?.skipToNext()
+    fun skipNext() = onMain { selected?.transportControls?.skipToNext() }
 
-    fun skipPrevious() = selected?.transportControls?.skipToPrevious()
+    fun skipPrevious() = onMain { selected?.transportControls?.skipToPrevious() }
 
-    fun seekTo(positionMs: Long) {
-        val controller = selected ?: return
+    fun seekTo(positionMs: Long) = onMain {
+        val controller = selected ?: return@onMain
         controller.transportControls.seekTo(positionMs.coerceAtLeast(0L))
         // Optimistically move our own playhead so the lyrics jump immediately
         // instead of waiting for the player to echo the seek back.
