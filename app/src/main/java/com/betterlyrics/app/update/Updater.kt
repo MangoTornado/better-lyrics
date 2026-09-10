@@ -13,7 +13,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * Finds, downloads and hands over updates.
@@ -43,6 +45,23 @@ class Updater(
      * unit tests *are* the debug build, so the real value switches off the code under test.
      */
     private val updatableInPlace: Boolean = !BuildConfig.DEBUG,
+    /**
+     * How the APK is fetched, given the release, where to put it, and a progress callback taking a
+     * fraction. Null means the real download.
+     *
+     * A seam for the tests, because the interesting behaviour here is what happens *around* the
+     * download — whether a second attempt spends the bytes again, and whether the prompt can still
+     * be answered afterwards — and none of that should need a network to check.
+     */
+    private val fetchApk: (suspend (AvailableRelease, File, (Float) -> Unit) -> Unit)? = null,
+    /**
+     * How the finished APK is handed to Android. Null means the real installer.
+     *
+     * Also a seam, and the important one: Android tells an app *nothing* when the user cancels the
+     * install screen, so the only way to reproduce that case is to hand over and then look at what
+     * state we were left in.
+     */
+    private val handOver: ((File) -> Boolean)? = null,
 ) {
 
     sealed interface State {
@@ -107,7 +126,11 @@ class Updater(
                 if (since in 0 until CHECK_INTERVAL_MS) return
             }
         }
-        if (_state.value is State.Downloading) return
+        // A download in flight, or one finished and waiting for a tap, is a better thing to be
+        // showing than the result of a fresh check. Overwriting the latter would throw away the
+        // prompt for an update that is already on disk — and if the check failed, throw it away for
+        // nothing.
+        if (_state.value is State.Downloading || _state.value is State.ReadyToInstall) return
 
         checkedThisLaunch = true
         _state.value = State.Checking
@@ -137,13 +160,21 @@ class Updater(
         _state.value = State.Idle
     }
 
-    /** Put the prompt away without skipping: it comes back at the next check. */
+    /**
+     * Put the prompt away without skipping: it comes back at the next check.
+     *
+     * [State.ReadyToInstall] is included, and that is the fix for a prompt nobody could escape.
+     * Android says nothing at all when the user cancels its install screen, so that state is
+     * where the app is left — and it used to be treated as busy, which meant no buttons and a
+     * dialog that ignored the back gesture. Downloaded and not installed is not busy; it is a
+     * decision waiting on the user, and every decision needs a way to say no.
+     *
+     * A download in flight is deliberately not dismissible: it ends on its own, and its state is
+     * replaced when it does.
+     */
     fun dismiss() {
-        if (_state.value is State.Available || _state.value is State.Failed ||
-            _state.value is State.UpToDate
-        ) {
-            _state.value = State.Idle
-        }
+        if (_state.value is State.Downloading || _state.value is State.Checking) return
+        _state.value = State.Idle
     }
 
     /**
@@ -153,11 +184,17 @@ class Updater(
      * download must not cost the user storage forever.
      */
     suspend fun downloadAndInstall(release: AvailableRelease) {
-        _state.value = State.Downloading(release, if (release.apkSizeBytes > 0) 0f else -1f)
-
-        val file = runCatching { download(release) }
-            .onFailure { Log.w(TAG, "download failed: ${it.message}") }
-            .getOrNull()
+        // A copy already on disk is handed straight over. This is what makes "Install" work a
+        // second time after the system installer was cancelled — the file is downloaded, the only
+        // thing that failed was the confirmation, and asking for 34 MB again to fix a mis-tap is
+        // not on. Only a *finished* download qualifies: an interrupted one never gets this name.
+        val ready = completedApk(release)
+        val file = ready ?: run {
+            _state.value = State.Downloading(release, if (release.apkSizeBytes > 0) 0f else -1f)
+            runCatching { download(release) }
+                .onFailure { Log.w(TAG, "download failed: ${it.message}") }
+                .getOrNull()
+        }
 
         if (file == null) {
             _state.value = State.Failed("The download did not finish")
@@ -165,7 +202,7 @@ class Updater(
         }
 
         _state.value = State.ReadyToInstall(release)
-        if (!install(file)) {
+        if (!(handOver ?: ::install)(file)) {
             _state.value = State.Failed(
                 "Could not open the installer. The APK is downloaded — " +
                     "install it from your Downloads or Files app.",
@@ -173,19 +210,44 @@ class Updater(
         }
     }
 
-    private suspend fun download(release: AvailableRelease): File = withContext(Dispatchers.IO) {
-        val directory = File(context.cacheDir, DIRECTORY).apply { mkdirs() }
-        // One file per version, replaced rather than accumulated.
-        directory.listFiles()?.forEach { it.delete() }
-        val target = File(directory, "better-lyrics-${release.versionName}.apk")
+    /** Where a given release's APK lives once it is fully downloaded. */
+    private fun apkFor(release: AvailableRelease) =
+        File(File(context.cacheDir, DIRECTORY), "better-lyrics-${release.versionName}.apk")
 
-        Http.client.newCall(Http.request(release.apkUrl)).execute().use { response ->
+    /**
+     * The APK for this release, if a complete one is on disk.
+     *
+     * "Complete" is decided by the name rather than by measuring: [download] writes to a `.part`
+     * file and renames it only once the last byte has arrived, so a file with the final name cannot
+     * be a half-downloaded one. Guessing from the length instead would hand the installer a
+     * truncated APK, which fails in a way that looks like a corrupt release.
+     */
+    private fun completedApk(release: AvailableRelease): File? =
+        apkFor(release).takeIf { it.isFile && it.length() > 0 }
+
+    private suspend fun download(release: AvailableRelease): File = withContext(Dispatchers.IO) {
+        File(context.cacheDir, DIRECTORY).mkdirs()
+        val target = apkFor(release)
+        // One file per version, replaced rather than accumulated.
+        target.parentFile?.listFiles()?.forEach { it.delete() }
+
+        val fetch = fetchApk
+        if (fetch != null) {
+            fetch(release, target) { fraction -> _state.value = State.Downloading(release, fraction) }
+            return@withContext target
+        }
+
+        // Written under a different name and renamed at the end, so the finished name means
+        // finished. Without that, a download cut off halfway leaves a file that looks complete and
+        // gets handed to the installer on the next attempt.
+        val part = File(target.parentFile, target.name + ".part")
+        http.newCall(Http.request(release.apkUrl)).execute().use { response ->
             if (!response.isSuccessful) error("HTTP ${response.code}")
             val body = response.body ?: error("empty response")
             val total = release.apkSizeBytes.takeIf { it > 0 } ?: body.contentLength()
 
             body.byteStream().use { input ->
-                target.outputStream().use { output ->
+                part.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     var written = 0L
                     var lastPublished = 0L
@@ -205,7 +267,25 @@ class Updater(
                 }
             }
         }
+        if (!part.renameTo(target)) error("could not finish writing the download")
         target
+    }
+
+    /**
+     * A client of its own for the download, and one line is the whole reason.
+     *
+     * The shared client caps an entire call at twenty seconds, which is right for a lyrics lookup
+     * and hopeless for a 34 MB APK: on anything slower than about 14 Mbps every update would have
+     * failed with "the download did not finish", the same message as a real failure, and the app
+     * would never have updated itself on a mobile connection. The read timeout stays, so a
+     * connection that dies still gives up rather than hanging the prompt forever; it is only the
+     * overall limit that has no business being here.
+     */
+    private val http: OkHttpClient by lazy {
+        Http.client.newBuilder()
+            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
     }
 
     /**

@@ -1267,6 +1267,8 @@ fun SettingsSheet(
                     subtitle = when (val state = updateState) {
                         is Updater.State.Available ->
                             "You have ${updater.currentVersion} · tap to download and install"
+                        is Updater.State.ReadyToInstall ->
+                            "Downloaded · tap to open the installer again"
                         is Updater.State.Failed -> state.message
                         is Updater.State.UpToDate -> "${updater.currentVersion} is the newest release"
                         else -> "Asks GitHub for the newest release"
@@ -1276,6 +1278,12 @@ fun SettingsSheet(
                         scope.launch {
                             when (val state = updateState) {
                                 is Updater.State.Available ->
+                                    updater.downloadAndInstall(state.release)
+
+                                // Already downloaded: hand it over again rather than starting a
+                                // fresh check, which is the useful answer after Android's install
+                                // screen was cancelled.
+                                is Updater.State.ReadyToInstall ->
                                     updater.downloadAndInstall(state.release)
 
                                 is Updater.State.Downloading -> Unit

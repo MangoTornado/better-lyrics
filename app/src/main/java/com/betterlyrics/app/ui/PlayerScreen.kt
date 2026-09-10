@@ -161,9 +161,15 @@ fun PlayerScreen(
             state = updateState,
             currentVersion = container.updater.currentVersion,
             onInstall = {
-                (updateState as? Updater.State.Available)?.let { available ->
-                    scope.launch { container.updater.downloadAndInstall(available.release) }
+                // Both states, because pressing Install after cancelling Android's installer has to
+                // hand the same file over again rather than doing nothing — which, with the only
+                // button in the dialog, is what left it stuck.
+                val release = when (val state = updateState) {
+                    is Updater.State.Available -> state.release
+                    is Updater.State.ReadyToInstall -> state.release
+                    else -> null
                 }
+                release?.let { scope.launch { container.updater.downloadAndInstall(it) } }
             },
             onSkip = {
                 (updateState as? Updater.State.Available)?.let {

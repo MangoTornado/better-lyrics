@@ -49,7 +49,12 @@ fun UpdatePrompt(
         else -> return
     }
     val downloading = state as? Updater.State.Downloading
-    val busy = downloading != null || state is Updater.State.ReadyToInstall
+    // Only a download in flight counts as busy. "Downloaded, not installed" used to as well, which
+    // is how this dialog became a trap: Android tells an app nothing when its install screen is
+    // cancelled, so the app sat in that state with no buttons and a back gesture that did nothing,
+    // for as long as the process lived. Nobody noticed because a *successful* install replaces the
+    // process before the state is ever seen again.
+    val busy = downloading != null
 
     Dialog(onDismissRequest = { if (!busy) onDismiss() }) {
         Column(
@@ -114,13 +119,21 @@ fun UpdatePrompt(
                     }
                 }
 
-                state is Updater.State.ReadyToInstall -> Text(
-                    "Downloaded. Android will ask you to confirm the install.",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 13.sp,
-                )
-
                 else -> {
+                    if (state is Updater.State.ReadyToInstall) {
+                        // Covers both moments this state is on screen: just before Android's screen
+                        // appears, and after it has been dismissed. The app cannot tell those apart
+                        // — nothing is reported back either way — so it says something true of both
+                        // rather than guessing.
+                        Text(
+                            "Downloaded. Android's own installer confirms it — if it did not " +
+                                "appear, or you closed it, press Install again. It will not " +
+                                "download a second time.",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(bottom = 14.dp),
+                        )
+                    }
                     DialogButton("Install", filled = true, onClick = onInstall)
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
