@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A slur over three noteheads: the notation for a melisma — one syllable sung across several
+  notes — which is the app's name and the thing its renderer draws letter by letter. The three
+  dots are the interlude marker the renderer already shows between vocal lines.
+
+  Drawn inside the central 66dp a launcher mask is guaranteed to keep, and sat 4dp above the
+  geometric centre: the dots are compact and the slur is thin, so a mark centred by its bounding
+  box reads as sitting too low.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFF4FFFB" android:pathData="M26,54 C38,28 70,28 82,54 C70,37 38,37 26,54 Z" />
+    <path android:fillColor="#FFF4FFFB" android:pathData="M39,68 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
+    <path android:fillColor="#FFF4FFFB" android:pathData="M54,68 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
+    <path android:fillColor="#FFF4FFFB" android:pathData="M69,68 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
+</vector>

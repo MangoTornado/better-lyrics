@@ -1214,7 +1214,7 @@ fun SettingsSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Image(
-                        painter = painterResource(R.drawable.ic_brand_on_dark),
+                        painter = painterResource(R.drawable.ic_brand),
                         contentDescription = null,
                         modifier = Modifier.size(44.dp).clip(RoundedCornerShape(11.dp)),
                     )

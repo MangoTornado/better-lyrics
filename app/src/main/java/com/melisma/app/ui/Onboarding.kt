@@ -73,7 +73,7 @@ fun WelcomeSheet(
                 // dark surface is named explicitly rather than left to a night qualifier the
                 // app would ignore. Its black field blends into the sheet, leaving the mark.
                 Image(
-                    painter = painterResource(R.drawable.ic_brand_on_dark),
+                    painter = painterResource(R.drawable.ic_brand),
                     contentDescription = null,
                     modifier = Modifier
                         .size(52.dp)

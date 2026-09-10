@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Sampled from the icon artwork itself. The adaptive icon insets the artwork so its
-      mark survives the launcher's mask, and this fills the border it leaves behind — so
-      it has to match the artwork's own background exactly or the seam shows.
+      The icon's two greens. A melisma is sung, so the mark is a slur; the colour only has to
+      be its own — the blue it replaced was Spicy Lyrics', which is the one thing a port that
+      credits its original should not be wearing.
     -->
-    <color name="ic_launcher_background">#28B5D9</color>
+    <color name="brand_teal_light">#17C9A6</color>
+    <color name="ic_launcher_background">#0B6E64</color>
 </resources>

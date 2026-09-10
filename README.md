@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/branding/icon-light.jpg" width="104" alt="" />
+<img src="docs/branding/icon.png" width="104" alt="" />
 
 # Melisma
 

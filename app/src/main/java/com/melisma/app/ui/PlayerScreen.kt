@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -746,80 +748,131 @@ private fun ViewControls(
     onRetry: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
-        if (sourceLabel != null || providerName != null) {
-            if (sourceLabel != null) {
-                Text(
-                    text = sourceLabel,
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+    // Two shapes, chosen by how much room there is rather than by orientation, so a tablet and
+    // a split-screen window each get the one that fits. Stacked, the labels and the buttons cost
+    // about 85dp of height — a fifth of a phone held sideways, taken from the lyrics, while the
+    // width beside a two-word source label sat empty.
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val sideBySide = maxWidth >= 560.dp
+
+        val labels: @Composable () -> Unit = {
+            if (sourceLabel != null || providerName != null) {
+                Column {
+                    if (sourceLabel != null) {
+                        Text(
+                            text = sourceLabel,
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (providerName != null) {
+                        Text(
+                            text = providerName,
+                            color = Color.White.copy(alpha = 0.4f),
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (!sideBySide) Spacer(Modifier.height(6.dp))
             }
-            if (providerName != null) {
-                Text(
-                    text = providerName,
-                    color = Color.White.copy(alpha = 0.4f),
-                    fontSize = 11.sp,
-                )
-            }
-            Spacer(Modifier.height(6.dp))
         }
 
         // Scrollable: there are more controls than fit across a phone, and hiding half of
-        // them behind an overflow menu would only make them harder to reach.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (romanizationAvailable) {
-                LabelChip("文A", "Toggle romanization", settings.showRomanization, accent, onToggleRomanization)
-            }
-            // Hidden when neither source could produce one — an English song read in
-            // English has nothing to translate, and a button that cannot work is worse
-            // than no button.
-            if (translationAvailable) {
+        // them behind an overflow menu would only make them harder to reach. Pushed to the far
+        // edge when they do fit, so they read as belonging to the bar rather than trailing the
+        // text they happen to sit beside.
+        val chips: @Composable (Modifier) -> Unit = { modifier ->
+            Row(
+                modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = if (sideBySide) {
+                    Arrangement.spacedBy(8.dp, Alignment.End)
+                } else {
+                    Arrangement.spacedBy(8.dp)
+                },
+            ) {
+                if (romanizationAvailable) {
+                    LabelChip(
+                        "文A",
+                        "Toggle romanization",
+                        settings.showRomanization,
+                        accent,
+                        onToggleRomanization,
+                    )
+                }
+                // Hidden when neither source could produce one — an English song read in
+                // English has nothing to translate, and a button that cannot work is worse
+                // than no button.
+                if (translationAvailable) {
+                    ActionChip(
+                        AppIcons.Translate,
+                        // Which source is in use is a Settings decision; here it is on or off.
+                        when (settings.translationSource) {
+                            TranslationSource.OFF -> "Show translation"
+                            TranslationSource.PROVIDER -> "Translation from the source — tap to hide"
+                            TranslationSource.DEVICE -> "Translation on this device — tap to hide"
+                        },
+                        settings.translationSource != TranslationSource.OFF,
+                        accent,
+                        onToggleTranslation,
+                    )
+                }
                 ActionChip(
-                    AppIcons.Translate,
-                    // Which source is in use is a Settings decision; here it is on or off.
-                    when (settings.translationSource) {
-                        TranslationSource.OFF -> "Show translation"
-                        TranslationSource.PROVIDER -> "Translation from the source — tap to hide"
-                        TranslationSource.DEVICE -> "Translation on this device — tap to hide"
-                    },
-                    settings.translationSource != TranslationSource.OFF,
+                    AppIcons.Cinema,
+                    "Cinema view",
+                    settings.viewMode == ViewMode.CINEMA,
                     accent,
-                    onToggleTranslation,
+                    onToggleCinema,
                 )
+                if (settings.viewMode == ViewMode.CINEMA) {
+                    ActionChip(
+                        AppIcons.SwapSides,
+                        "Swap which side the artwork is on",
+                        false,
+                        accent,
+                        onSwapSide,
+                    )
+                }
+                if (popupAvailable) {
+                    ActionChip(AppIcons.PopupWindow, "Popup lyrics", false, accent, onEnterPopup)
+                }
+                ActionChip(
+                    AppIcons.CenterFocus,
+                    "Scroll back to the line that's playing",
+                    false,
+                    accent,
+                    onScrollToActive,
+                )
+                if (hasDocument) {
+                    ActionChip(AppIcons.Copy, "Select lines to copy", false, accent, onStartSelection)
+                }
+                ActionChip(AppIcons.NoteAdd, "Load a lyrics file", false, accent, onImport)
+                ActionChip(AppIcons.Refresh, "Look up again", false, accent, onRetry)
+                ActionChip(AppIcons.Tune, "Settings", false, accent, onSettings)
             }
-            ActionChip(
-                AppIcons.Cinema,
-                "Cinema view",
-                settings.viewMode == ViewMode.CINEMA,
-                accent,
-                onToggleCinema,
-            )
-            if (settings.viewMode == ViewMode.CINEMA) {
-                ActionChip(AppIcons.SwapSides, "Swap which side the artwork is on", false, accent, onSwapSide)
+        }
+
+        if (sideBySide) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Capped so a long provider credit cannot crowd out the buttons: weighted
+                // children are measured with what is left over, and left uncapped the text
+                // would take it all.
+                Box(Modifier.widthIn(max = 260.dp)) { labels() }
+                Spacer(Modifier.width(10.dp))
+                chips(Modifier.weight(1f))
             }
-            if (popupAvailable) {
-                ActionChip(AppIcons.PopupWindow, "Popup lyrics", false, accent, onEnterPopup)
+        } else {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
+                labels()
+                chips(Modifier.fillMaxWidth())
             }
-            ActionChip(
-                AppIcons.CenterFocus,
-                "Scroll back to the line that's playing",
-                false,
-                accent,
-                onScrollToActive,
-            )
-            if (hasDocument) {
-                ActionChip(AppIcons.Copy, "Select lines to copy", false, accent, onStartSelection)
-            }
-            ActionChip(AppIcons.NoteAdd, "Load a lyrics file", false, accent, onImport)
-            ActionChip(AppIcons.Refresh, "Look up again", false, accent, onRetry)
-            ActionChip(AppIcons.Tune, "Settings", false, accent, onSettings)
         }
     }
 }

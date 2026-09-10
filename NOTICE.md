@@ -127,3 +127,11 @@ user's Spotify token to a third party and porting his bespoke binary payload for
 is his service to run rather than this app's to lean on.
 
 None of these are affiliated with this app, and none of them endorse it.
+
+## Artwork
+
+The Melisma icon — a slur over three noteheads — is original to this project. It is
+deliberately not derived from Spicy Lyrics' mark: the AGPL covers that project's code, not its
+logo, and a port that credits its original should not be wearing its badge. Earlier builds, under
+the name Better Lyrics, used an icon adapted from Spicy Lyrics' with Android's robot added; both
+are gone as of v2.1.0.
