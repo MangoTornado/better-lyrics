@@ -229,9 +229,22 @@ recomposition at all** — the frame loop only invalidates the draw phase. On to
   change nobody can see. A still background is cached as a layer and re-blitted.
 - **Frames stop when nothing is moving.** Once a paused song has settled, the lyrics stop
   drawing entirely — measured at 55 frames per 8 s while playing against 8 while paused.
+- **A paused song stops everything else too.** The background's drift and the scrolling
+  title are the only other things on this screen that animate on their own account, and
+  both stop with the music. One animation left running decides the whole app's idle
+  behaviour, however cheap it is by itself: the frame pipeline cannot idle while anything
+  is still asking to be drawn.
 
 Absolute frame times were measured on a software-rendered emulator and are not meaningful
 as such; the ratios above are.
+
+Two more things happen away from the screen. The app **stands its notification listener
+down** after ten minutes with nothing playing and no window of its own on screen — that
+binding is what keeps the process resident, so giving it back is what lets the app actually
+close; the timeout is under *Settings → Battery*. And it **follows the system's battery
+saver**, holding the background still and skipping the early next-track lookup, with a
+switch per measure so anything that gets in the way can be turned off — including the one
+that is off by default, letting the screen time out mid-song.
 
 ## Looking at it while developing
 

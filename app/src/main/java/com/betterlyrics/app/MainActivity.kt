@@ -90,7 +90,8 @@ class MainActivity : ComponentActivity() {
             combine(
                 container.media.snapshot,
                 container.settings.settings,
-            ) { snapshot, settings ->
+                container.saving,
+            ) { snapshot, settings, saving ->
                 PopupInputs(
                     isPlaying = snapshot.playback.isPlaying,
                     hasTrack = snapshot.hasTrack,
@@ -99,6 +100,9 @@ class MainActivity : ComponentActivity() {
                     autoEnter = settings.popupAutoEnter,
                     shape = settings.popupShape,
                     keepScreenOn = settings.keepScreenOn,
+                    // Switching battery saver on has to let go of the screen there and then, not
+                    // at the next pause.
+                    releaseScreen = saving.releaseScreen,
                 )
             }.distinctUntilChanged().collect {
                 applyPopupParams(it.isPlaying)
@@ -166,6 +170,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         container.media.refresh()
+        // Battery saver may have been switched on while the process was gone.
+        container.refreshPowerSave()
         applyKeepScreenOn()
         applyPopupParams(container.media.snapshot.value.playback.isPlaying)
     }
@@ -219,6 +225,8 @@ class MainActivity : ComponentActivity() {
          * tuple was unchanged, and the flag stayed as it was until playback happened to change.
          */
         val keepScreenOn: Boolean,
+        /** Also not a popup input, and here for the same reason. */
+        val releaseScreen: Boolean,
     )
 
     /**
@@ -333,7 +341,11 @@ class MainActivity : ComponentActivity() {
      */
     private fun applyKeepScreenOn() {
         val wanted = container.settings.current.keepScreenOn &&
-            container.media.snapshot.value.playback.isPlaying
+            container.media.snapshot.value.playback.isPlaying &&
+            // Battery saver, if it has been allowed this one. The screen is the most expensive
+            // thing on the phone by a wide margin, so it is the measure that saves the most and
+            // costs the most — which is why it is off by default and asked for explicitly.
+            !container.saving.value.releaseScreen
         if (wanted) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {

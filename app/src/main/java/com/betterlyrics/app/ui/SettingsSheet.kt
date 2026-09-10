@@ -426,6 +426,18 @@ fun SettingsSheet(
                             "Shrinking the app should not add a panel that was not on screen a " +
                             "moment ago.",
                     )
+                    ToggleRow(
+                        title = "Hold the background still in the window",
+                        subtitle = "The blurred cover instead of the drifting one",
+                        checked = settings.popupStillBackground,
+                        accent = accent,
+                        onCheckedChange = { store.setPopupStillBackground(it) },
+                    )
+                    Help(
+                        "The window is the thing that stays on screen over whatever else you are " +
+                            "doing, sometimes for an hour, and the drifting background is the most " +
+                            "expensive thing this app draws. Off keeps it moving in there too.",
+                    )
                 }
             }
 
@@ -1011,7 +1023,7 @@ fun SettingsSheet(
 
             Section(
                 title = "Battery",
-                subtitle = "When to stop watching in the background",
+                subtitle = "Standing down, and what battery saver may change",
                 open = openSection == "battery",
                 accent = accent,
                 onToggle = { openSection = if (openSection == "battery") null else "battery" },
@@ -1045,6 +1057,75 @@ fun SettingsSheet(
                         "for you. Opening the app starts it watching again immediately. Music " +
                         "already playing always keeps it awake, however long the timer.",
                 )
+
+                Spacer(Modifier.height(6.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+                Spacer(Modifier.height(10.dp))
+
+                val saving by container.saving.collectAsStateWithLifecycle()
+                ToggleRow(
+                    title = "Follow the system battery saver",
+                    subtitle = if (saving.any) {
+                        "Battery saver is on now, and these are in force"
+                    } else {
+                        "Ease off while the phone is in battery saver"
+                    },
+                    checked = settings.followBatterySaver,
+                    accent = accent,
+                    onCheckedChange = { store.setFollowBatterySaver(it) },
+                )
+                Help(
+                    "Nothing here changes anything until the phone puts itself in battery saver — " +
+                        "and then only what you have ticked. Android holds its own animations still " +
+                        "in that mode for the same reason; an app meant to be left on screen has " +
+                        "more to give back than most.",
+                )
+
+                // Each measure separately, because each one costs something different. Shown only
+                // while they can do anything: three switches that are all no-ops explain nothing.
+                AnimatedVisibility(visible = settings.followBatterySaver) {
+                    Column(Modifier.fillMaxWidth()) {
+                        ToggleRow(
+                            title = "Hold the background still",
+                            subtitle = "The drifting cover stops moving",
+                            checked = settings.saverStillBackground,
+                            accent = accent,
+                            onCheckedChange = { store.setSaverStillBackground(it) },
+                        )
+                        Help(
+                            "The biggest saving of the three by a distance, and the least missed: " +
+                                "the moving background is three full-screen layers redrawn thirty " +
+                                "times a second, and what replaces it is the same cover, blurred " +
+                                "and still.",
+                        )
+                        ToggleRow(
+                            title = "Let the screen time out",
+                            subtitle = "Even while the music is playing",
+                            checked = settings.saverReleaseScreen,
+                            accent = accent,
+                            onCheckedChange = { store.setSaverReleaseScreen(it) },
+                        )
+                        Help(
+                            "Off by default, alone among these. The screen is by far the most " +
+                                "expensive thing on a phone, so this saves the most — and it is " +
+                                "also the one that stops the app doing its job, since the lyrics " +
+                                "go dark in the middle of the song. Only worth it if you would " +
+                                "rather have the battery.",
+                        )
+                        ToggleRow(
+                            title = "Skip the early next-track lookup",
+                            subtitle = "Fetch lyrics when the track starts instead",
+                            checked = settings.saverSkipPrefetch,
+                            accent = accent,
+                            onCheckedChange = { store.setSaverSkipPrefetch(it) },
+                        )
+                        Help(
+                            "Costs one request and a little parsing per track, and only does " +
+                                "anything at all for a player that publishes its queue. The lyrics " +
+                                "still arrive when the track does; they are just not already there.",
+                        )
+                    }
+                }
             }
 
             Section(

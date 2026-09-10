@@ -234,6 +234,11 @@ class MediaSessionRepository(
      * into the cache under its key, which is worse than not prefetching at all.
      */
     private fun MediaController.nextInQueue(): TrackInfo? {
+        // Reading the queue is a call across to the player for a list that can be a whole album,
+        // and this runs on every metadata and state change of every session on the device. Nobody
+        // asked for it unless the prefetch is on, so nobody pays for it either.
+        if (!settings.current.prefetchNextTrack) return null
+
         val items = runCatching { queue }.getOrNull()?.takeIf { it.size > 1 } ?: return null
         val activeId = playbackState?.activeQueueItemId ?: return null
         if (activeId == MediaSession.QueueItem.UNKNOWN_ID.toLong()) return null
@@ -429,18 +434,38 @@ class MediaSessionRepository(
     // ---- per-controller callbacks ------------------------------------------
 
     private inner class ControllerWatcher(private val controller: MediaController) {
+
+        /**
+         * Whether anything this session says can change what is on screen.
+         *
+         * An ignored player is watched but not published — the sessions it is competing with are
+         * chosen from the ones that are not ignored, so republishing on its behalf can only ever
+         * produce the snapshot that is already showing. That matters because the usual reason to
+         * ignore a player is that it talks constantly: a video app that reports a new position
+         * every second would otherwise drive a full re-read of every session on the device, once a
+         * second, for as long as it is open.
+         */
+        private fun ignored(): Boolean =
+            controller.packageName in settings.current.ignoredPlayers
+
         private val callback = object : MediaController.Callback() {
-            override fun onMetadataChanged(metadata: MediaMetadata?) = publish()
+            override fun onMetadataChanged(metadata: MediaMetadata?) {
+                if (!ignored()) publish()
+            }
 
             // The queue usually arrives after the metadata does, and changes whenever the
             // user reorders it, so the next track is only known by listening for it.
-            override fun onQueueChanged(queue: MutableList<MediaSession.QueueItem>?) = publish()
+            override fun onQueueChanged(queue: MutableList<MediaSession.QueueItem>?) {
+                if (!ignored()) publish()
+            }
 
             override fun onPlaybackStateChanged(state: PlaybackState?) {
                 if (state?.state == PlaybackState.STATE_PLAYING) {
+                    // Recorded even for an ignored player: it decides the tie-break, and un-ignoring
+                    // one should not make it look like it has never played.
                     lastPlayingAt[controller.packageName] = SystemClock.elapsedRealtime()
                 }
-                publish()
+                if (!ignored()) publish()
             }
 
             override fun onSessionDestroyed() {

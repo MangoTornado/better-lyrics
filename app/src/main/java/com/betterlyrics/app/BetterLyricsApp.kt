@@ -20,6 +20,8 @@ import com.betterlyrics.app.lyrics.translate.LyricsTranslator
 import com.betterlyrics.app.media.MediaSessionRepository
 import com.betterlyrics.app.media.NowPlayingExtras
 import com.betterlyrics.app.media.SpotifyExtras
+import com.betterlyrics.app.settings.PowerSaveWatcher
+import com.betterlyrics.app.settings.Saving
 import com.betterlyrics.app.settings.SettingsStore
 import com.betterlyrics.app.update.Updater
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +34,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.betterlyrics.app.media.ArtworkSearch
 import com.betterlyrics.app.settings.ArtworkSource
@@ -58,6 +62,24 @@ class AppContainer(context: Context) {
 
     val settings = SettingsStore(context)
     val media = MediaSessionRepository(context, settings)
+
+    private val powerSave = PowerSaveWatcher(context)
+
+    /**
+     * What the app is giving up to save power, right now.
+     *
+     * One flow rather than each reader asking the system for itself: the background, the
+     * screen-awake flag and the prefetch all act on it, and all three have to change the moment
+     * battery saver is switched on rather than at the next track.
+     */
+    val saving: StateFlow<Saving> = combine(
+        settings.settings,
+        powerSave.saving,
+    ) { current, systemSaverOn -> Saving.of(current, systemSaverOn) }
+        .stateIn(scope, SharingStarted.Eagerly, Saving.NONE)
+
+    /** Re-read the system's battery saver, for a resume that may have missed the broadcast. */
+    fun refreshPowerSave() = powerSave.refresh()
 
     private val cache = LyricsCache(context)
     private val romanizer = Romanizer()
@@ -226,10 +248,11 @@ class AppContainer(context: Context) {
         SpotifyWebToken.keepFresh(settings)
 
         // Turning a player off has to take effect now, not at the next track change — which for the
-        // only player on the device could be never.
+        // only player on the device could be never. Same for the prefetch, which decides whether the
+        // queue is read at all: a player can go three minutes without saying anything.
         scope.launch {
             settings.settings
-                .map { it.ignoredPlayers }
+                .map { it.ignoredPlayers to it.prefetchNextTrack }
                 .distinctUntilChanged()
                 .collect { media.republish() }
         }
@@ -242,12 +265,17 @@ class AppContainer(context: Context) {
                 .collect { track -> lyrics.setTrack(track) }
         }
 
-        // Warm the cache for whatever is queued next, when the player says what that is.
+        // Warm the cache for whatever is queued next, when the player says what that is — unless
+        // battery saver is on and has been allowed to skip it. Not worth re-evaluating when the
+        // saver changes: this is a guess about a track that has not started, so losing one is
+        // nothing, and the track itself is looked up properly when it plays.
         scope.launch {
             media.snapshot
                 .map { it.nextTrack }
                 .distinctUntilChanged { old, new -> old?.cacheKey == new?.cacheKey }
-                .collect { next -> lyrics.prefetchNext(next) }
+                .collect { next ->
+                    lyrics.prefetchNext(next.takeIf { !saving.value.skipPrefetch })
+                }
         }
 
         // Keyed on the settings as well as the track: turning "use extras from Spotify"

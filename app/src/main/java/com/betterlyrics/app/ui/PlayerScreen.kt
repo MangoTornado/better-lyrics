@@ -104,6 +104,7 @@ fun PlayerScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
     val haptics = LocalHapticFeedback.current
+    val saving by container.saving.collectAsStateWithLifecycle()
 
     var demoMode by remember { mutableStateOf(false) }
     // Spotify's full-size cover beats the thumbnail a media session publishes, so prefer it
@@ -186,10 +187,16 @@ fun PlayerScreen(
     val audioManager = remember { context.getSystemService(AudioManager::class.java) }
     var volume by remember { mutableFloatStateOf(audioManager.musicVolume()) }
     LaunchedEffect(settings.showVolumeSlider) {
-        // Poll so the slider still reflects the hardware keys.
-        while (settings.showVolumeSlider) {
-            volume = audioManager.musicVolume()
-            delay(500)
+        if (!settings.showVolumeSlider) return@LaunchedEffect
+        // Poll so the slider still reflects the hardware keys — but only while there is a slider
+        // on screen to reflect them on. Reading the volume is a call into the audio service, and
+        // a composition outlives the window it was drawn in: unguarded, this went on asking twice
+        // a second for as long as the process lived.
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                volume = audioManager.musicVolume()
+                delay(500)
+            }
         }
     }
 
@@ -225,8 +232,12 @@ fun PlayerScreen(
             style = settings.backgroundStyle,
             blurRadius = settings.backgroundBlur,
             // A floating window is small and often on screen for a long time; a still
-            // background there is both calmer and cheaper.
-            preferStill = popup,
+            // background there is both calmer and cheaper. Battery saver asks for the same
+            // thing more directly.
+            preferStill = (popup && settings.popupStillBackground) || saving.stillBackground,
+            // Paused music stops the drift, which stops the redraws. The demo is exempt: it
+            // exists to show the renderer off, and there is no playhead behind it to stop.
+            playing = snapshot.playback.isPlaying || demoMode,
             artistImage = extras.artistImage,
             tempoBpm = extras.tempo,
         )

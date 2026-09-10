@@ -53,8 +53,23 @@ fun DynamicBackground(
     modifier: Modifier = Modifier,
     /** Blur radius for the still styles, 0–67 px. */
     blurRadius: Int = 24,
-    /** Auto resolves to a still background here — a floating window, or battery saver. */
+    /**
+     * Hold the background still: a floating window, or battery saver.
+     *
+     * Overrides an explicit choice of the animated style rather than only resolving Auto, which is
+     * what it always claimed to do. A popup may be on screen above another app for hours, and
+     * battery saver is the system saying plainly that this is not the moment.
+     */
     preferStill: Boolean = false,
+    /**
+     * Whether the song is actually playing.
+     *
+     * The drift belongs to the song, so it stops when the song does — and stopping it is the
+     * difference between a paused lyrics screen costing nothing and costing three full-screen
+     * layers, thirty times a second, for as long as it is left open. It resumes from where it
+     * stopped rather than from zero, so a pause is a pause and not a cut.
+     */
+    playing: Boolean = true,
     /** The artist's image, when Spotify has given us one. */
     artistImage: Bitmap? = null,
     /**
@@ -66,14 +81,17 @@ fun DynamicBackground(
      */
     tempoBpm: Float? = null,
 ) {
-    val resolved = when (style) {
-        BackgroundStyle.AUTO ->
-            if (preferStill) BackgroundStyle.COVER_ART else BackgroundStyle.ANIMATED
-
+    val resolved = when {
         // Without a Spotify cookie there is no artist image to show, so fall back rather
         // than render an empty background.
-        BackgroundStyle.ARTIST_HEADER ->
-            if (artistImage != null) BackgroundStyle.ARTIST_HEADER else BackgroundStyle.COVER_ART
+        style == BackgroundStyle.ARTIST_HEADER && artistImage == null -> BackgroundStyle.COVER_ART
+
+        // The two styles that move are the two worth holding still.
+        preferStill &&
+            (style == BackgroundStyle.AUTO || style == BackgroundStyle.ANIMATED) ->
+            BackgroundStyle.COVER_ART
+
+        style == BackgroundStyle.AUTO -> BackgroundStyle.ANIMATED
 
         else -> style
     }
@@ -147,21 +165,26 @@ fun DynamicBackground(
     val driftSpeed = ((tempoBpm ?: 120f) / 120f).coerceIn(0.65f, 1.7f)
 
     var timeSeconds by remember { mutableStateOf(0f) }
-    LaunchedEffect(animated) {
-        if (!animated) return@LaunchedEffect
-        var start = 0L
-        var lastPublished = 0L
+
+    // Elapsed *playing* time, accumulated frame by frame rather than measured from a start
+    // stamp: a paused song stops the clock, and taking the difference from a fixed start would
+    // make it lurch forward by the length of the pause the moment the music came back.
+    LaunchedEffect(animated, playing) {
+        if (!animated || !playing) return@LaunchedEffect
+        var previousFrame = 0L
+        var unpublished = 0L
         while (true) {
             withFrameNanos { nanos ->
-                if (start == 0L) start = nanos
+                if (previousFrame != 0L) unpublished += nanos - previousFrame
+                previousFrame = nanos
                 // The layers drift on 30–70 second orbits, so publishing a new time every
                 // frame would redraw three full-screen textured layers for a change nobody
                 // can see. A third of the frames is indistinguishable and costs a third as
                 // much — and on this screen the background is the expensive part, not the
                 // lyrics.
-                if (nanos - lastPublished >= BACKGROUND_FRAME_INTERVAL_NANOS) {
-                    lastPublished = nanos
-                    timeSeconds = (nanos - start) / 1_000_000_000f
+                if (unpublished >= BACKGROUND_FRAME_INTERVAL_NANOS) {
+                    timeSeconds += unpublished / 1_000_000_000f
+                    unpublished = 0L
                 }
             }
         }

@@ -2,7 +2,6 @@ package com.betterlyrics.app.ui.components
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,10 +22,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,15 +63,7 @@ fun NowBar(
     onOpenSource: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // A progress bar does not need 60 fps; five updates a second is imperceptibly
-    // smooth and costs nothing.
-    var positionMs by remember { mutableStateOf(playback.currentMs()) }
-    LaunchedEffect(playback) {
-        while (true) {
-            positionMs = playback.currentMs()
-            kotlinx.coroutines.delay(200)
-        }
-    }
+    var positionMs by rememberPlayheadMs(playback)
 
     var scrubFraction by remember { mutableFloatStateOf(-1f) }
     val duration = playback.durationMs.coerceAtLeast(1L)
@@ -124,7 +113,7 @@ fun NowBar(
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                    modifier = Modifier.titleMarquee(playback.isPlaying),
                 )
                 Text(
                     text = track.artist.ifBlank { "Unknown artist" },

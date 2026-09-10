@@ -12,7 +12,12 @@ enum class BackgroundStyle(val label: String) {
     /** Album art, warped and drifting. Their "off", i.e. the animated background. */
     ANIMATED("Living"),
 
-    /** Living normally, still in the floating window or on battery saver. */
+    /**
+     * Living normally, still where the battery settings ask for it.
+     *
+     * Which is now the floating window and battery saver, and both are switches of their own — so
+     * this and [ANIMATED] differ only in that this one has no argument with them.
+     */
     AUTO("Auto"),
 
     /** Album art, still, blurred by [Settings.backgroundBlur]. Their "Cover Art". */
@@ -214,6 +219,15 @@ data class Settings(
     /** Show the cover and title in the floating window as well as the lyrics. */
     val popupShowArtwork: Boolean = true,
 
+    /**
+     * Hold the background still in the floating window.
+     *
+     * On by default: the window is what stays on screen over whatever else you are doing, often for
+     * an hour at a time, and a drifting background is the most expensive thing this app draws. Off
+     * keeps the animated one there too.
+     */
+    val popupStillBackground: Boolean = true,
+
     // ---- providers -------------------------------------------------------
     /**
      * Look the next queued track up before it starts.
@@ -272,6 +286,32 @@ data class Settings(
      * starting. Opening it starts watching again.
      */
     val backgroundTimeoutMinutes: Int = 10,
+
+    // ---- battery saver -----------------------------------------------------
+    /**
+     * Take the phone's own battery saver as a instruction to ease off.
+     *
+     * The system dims its own animations in this mode for exactly this reason, and an app whose
+     * entire purpose is to be left on screen has more to give back than most. What it actually
+     * does is the three switches below, each one separate: every measure here trades something
+     * away, and which trade is worth making is not the same answer for everybody.
+     */
+    val followBatterySaver: Boolean = true,
+
+    /** Hold the drifting background still while saving. The largest saving, and the cheapest to give up. */
+    val saverStillBackground: Boolean = true,
+
+    /**
+     * Stop holding the screen awake while saving.
+     *
+     * Off by default, alone among these: the screen is far and away the most expensive thing on the
+     * phone, but a lyrics screen that goes dark mid-song is the one measure here that breaks what
+     * the app is for.
+     */
+    val saverReleaseScreen: Boolean = false,
+
+    /** Skip looking the next queued track up early while saving. */
+    val saverSkipPrefetch: Boolean = true,
 
     // ---- updates ----------------------------------------------------------
     /**
@@ -469,6 +509,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         popupAutoEnter = prefs.getBoolean(KEY_POPUP_AUTO, true),
         popupShape = prefs.enum(KEY_POPUP_SHAPE, PopupShape.LANDSCAPE),
         popupShowArtwork = prefs.getBoolean(KEY_POPUP_ARTWORK, true),
+        popupStillBackground = prefs.getBoolean(KEY_POPUP_STILL_BACKGROUND, true),
 
         prefetchNextTrack = prefs.getBoolean(KEY_PREFETCH_NEXT, true),
         enabledProviders = prefs.getStringSet(KEY_PROVIDERS_ON, null)
@@ -506,6 +547,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         appleStorefront = prefs.trimmed(KEY_APPLE_STOREFRONT) ?: "us",
 
         backgroundTimeoutMinutes = prefs.getInt(KEY_BACKGROUND_TIMEOUT, 10),
+        followBatterySaver = prefs.getBoolean(KEY_FOLLOW_SAVER, true),
+        saverStillBackground = prefs.getBoolean(KEY_SAVER_STILL_BACKGROUND, true),
+        saverReleaseScreen = prefs.getBoolean(KEY_SAVER_RELEASE_SCREEN, false),
+        saverSkipPrefetch = prefs.getBoolean(KEY_SAVER_SKIP_PREFETCH, true),
         autoUpdateCheck = prefs.getBoolean(KEY_AUTO_UPDATE, true),
         lastUpdateCheckAt = prefs.getLong(KEY_UPDATE_CHECKED_AT, 0L),
         skippedUpdateVersion = prefs.trimmed(KEY_UPDATE_SKIPPED),
@@ -674,6 +719,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     fun setPopupShowArtwork(value: Boolean) = edit { putBoolean(KEY_POPUP_ARTWORK, value) }
 
+    fun setPopupStillBackground(value: Boolean) = edit {
+        putBoolean(KEY_POPUP_STILL_BACKGROUND, value)
+    }
+
     // ---- providers ----------------------------------------------------------
 
     fun setProviderEnabled(id: String, enabled: Boolean) = edit {
@@ -744,6 +793,20 @@ class SettingsStore(context: Context) : ProviderCredentials {
 
     fun setBackgroundTimeoutMinutes(value: Int) = edit {
         putInt(KEY_BACKGROUND_TIMEOUT, value.coerceIn(0, 24 * 60))
+    }
+
+    fun setFollowBatterySaver(value: Boolean) = edit { putBoolean(KEY_FOLLOW_SAVER, value) }
+
+    fun setSaverStillBackground(value: Boolean) = edit {
+        putBoolean(KEY_SAVER_STILL_BACKGROUND, value)
+    }
+
+    fun setSaverReleaseScreen(value: Boolean) = edit {
+        putBoolean(KEY_SAVER_RELEASE_SCREEN, value)
+    }
+
+    fun setSaverSkipPrefetch(value: Boolean) = edit {
+        putBoolean(KEY_SAVER_SKIP_PREFETCH, value)
     }
 
     fun setAutoUpdateCheck(value: Boolean) = edit { putBoolean(KEY_AUTO_UPDATE, value) }
@@ -893,6 +956,7 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_POPUP_AUTO = "popup_auto_enter"
         const val KEY_POPUP_SHAPE = "popup_shape"
         const val KEY_POPUP_ARTWORK = "popup_artwork"
+        const val KEY_POPUP_STILL_BACKGROUND = "popup_still_background"
 
         const val KEY_PREFETCH_NEXT = "prefetch_next"
         const val KEY_PROVIDERS_ON = "providers_enabled"
@@ -923,6 +987,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
         const val KEY_NETEASE_URL = "netease_url"
         const val KEY_AMLL_URL = "amll_url"
         const val KEY_BACKGROUND_TIMEOUT = "background_timeout_minutes"
+        const val KEY_FOLLOW_SAVER = "follow_battery_saver"
+        const val KEY_SAVER_STILL_BACKGROUND = "saver_still_background"
+        const val KEY_SAVER_RELEASE_SCREEN = "saver_release_screen"
+        const val KEY_SAVER_SKIP_PREFETCH = "saver_skip_prefetch"
         const val KEY_AUTO_UPDATE = "auto_update_check"
         const val KEY_UPDATE_CHECKED_AT = "update_checked_at"
         const val KEY_UPDATE_SKIPPED = "update_skipped_version"
