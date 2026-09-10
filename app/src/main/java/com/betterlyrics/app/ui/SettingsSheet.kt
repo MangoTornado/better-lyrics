@@ -364,19 +364,6 @@ fun SettingsSheet(
                 Help(
                     "Meant for split screen or a small window. The floating window switches to it on its own, so you do not need this for that.",
                 )
-
-                ToggleRow(
-                    title = "Keep the screen on while playing",
-                    subtitle = "Only while something is playing — it times out normally otherwise",
-                    checked = settings.keepScreenOn,
-                    accent = accent,
-                    onCheckedChange = { store.setKeepScreenOn(it) },
-                )
-                Help(
-                    "The screen is the most expensive thing on a phone by a wide margin, so this " +
-                        "is tied to playback rather than to the app being open. Pausing, or " +
-                        "reaching the end of a track, lets it time out as usual.",
-                )
             }
 
             Section(
@@ -426,17 +413,11 @@ fun SettingsSheet(
                             "Shrinking the app should not add a panel that was not on screen a " +
                             "moment ago.",
                     )
-                    ToggleRow(
-                        title = "Hold the background still in the window",
-                        subtitle = "The blurred cover instead of the drifting one",
-                        checked = settings.popupStillBackground,
-                        accent = accent,
-                        onCheckedChange = { store.setPopupStillBackground(it) },
-                    )
                     Help(
-                        "The window is the thing that stays on screen over whatever else you are " +
-                            "doing, sometimes for an hour, and the drifting background is the most " +
-                            "expensive thing this app draws. Off keeps it moving in there too.",
+                        "The window's background is held still rather than drifting, because it is " +
+                            "on screen over whatever else you are doing for far longer than the " +
+                            "app itself is. The switch for that is under Battery, with everything " +
+                            "else that trades a little of the look for charge.",
                     )
                 }
             }
@@ -668,6 +649,13 @@ fun SettingsSheet(
                         "does — a title, an artist, a length — so a video, a podcast or a browser tab " +
                         "arrives looking exactly like a song, gets looked up, and fills the cache with " +
                         "tracks that do not exist. Turn one off here and it is ignored entirely.",
+                )
+                Help(
+                    "Entirely, in the sense that matters for the battery as well as for the " +
+                        "lyrics: a player switched off here does not count as something playing. It " +
+                        "cannot hold the screen awake, it cannot keep the drifting background " +
+                        "moving, and it cannot stop the app standing down and letting go of the " +
+                        "process. A video left running for an hour is a video, not a song.",
                 )
 
                 val players = settings.seenPlayers.entries.sortedBy { it.value.lowercase() }
@@ -1023,11 +1011,52 @@ fun SettingsSheet(
 
             Section(
                 title = "Battery",
-                subtitle = "Standing down, and what battery saver may change",
+                subtitle = "The screen, standing down, battery saver",
                 open = openSection == "battery",
                 accent = accent,
                 onToggle = { openSection = if (openSection == "battery") null else "battery" },
             ) {
+                // Everything that trades a little of the app for charge lives here, wherever the
+                // thing it affects is configured. Splitting them across the sections they belong to
+                // — the screen under View, the window's background under Popup — meant nobody could
+                // see what the app was costing them, or find the three switches that change it.
+                Hint("Every setting that trades something for battery, in one place.")
+
+                ToggleRow(
+                    title = "Keep the screen on while playing",
+                    subtitle = "Only while something is playing — it times out normally otherwise",
+                    checked = settings.keepScreenOn,
+                    accent = accent,
+                    onCheckedChange = { store.setKeepScreenOn(it) },
+                )
+                Help(
+                    "The screen is the most expensive thing on a phone by a wide margin, so this " +
+                        "is tied to playback rather than to the app being open. Pausing, or " +
+                        "reaching the end of a track, lets it time out as usual — and a player you " +
+                        "have switched off under Players to follow does not count as playing.",
+                )
+
+                ToggleRow(
+                    title = "Hold the background still in the floating window",
+                    subtitle = "The blurred cover instead of the drifting one",
+                    checked = settings.popupStillBackground,
+                    accent = accent,
+                    onCheckedChange = { store.setPopupStillBackground(it) },
+                )
+                Help(
+                    "The window is what stays on screen over whatever else you are doing, " +
+                        "sometimes for an hour, and the drifting background is the most expensive " +
+                        "thing this app draws. Off keeps it moving in there too.",
+                )
+                Help(
+                    "Two things need no setting because they cost nothing: the drift stops on its " +
+                        "own whenever the music is paused, and so does a title too long to fit.",
+                )
+
+                Spacer(Modifier.height(6.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+                Spacer(Modifier.height(10.dp))
+
                 ChipGroup(
                     label = "Stop watching after",
                     options = BACKGROUND_TIMEOUTS,
@@ -1055,7 +1084,10 @@ fun SettingsSheet(
                         "there is nothing left running to wake up.\n\nThe cost, plainly: while " +
                         "stopped it cannot notice a track starting, so lyrics will not be waiting " +
                         "for you. Opening the app starts it watching again immediately. Music " +
-                        "already playing always keeps it awake, however long the timer.",
+                        "already playing always keeps it awake, however long the " +
+                        "timer.\n\n\"Playing\" means a player you follow. One switched off under " +
+                        "Players to follow is not watched and does not hold this open — a video " +
+                        "left running for an hour cannot keep the app awake.",
                 )
 
                 Spacer(Modifier.height(6.dp))

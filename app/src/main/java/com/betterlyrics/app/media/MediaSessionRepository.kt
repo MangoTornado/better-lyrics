@@ -197,33 +197,29 @@ class MediaSessionRepository(
         // Read per publish rather than held: switching a player off in Settings should take effect on
         // the next thing that happens, without wiring an observer through to here.
         val ignored = settings.current.ignoredPlayers
-        val candidates = watched.keys.filter {
-            it.hasUsableMetadata() && it.packageName !in ignored
-        }
-        if (candidates.isEmpty()) {
+        val winner = chooseSession(watched.keys.map { it.asCandidate() }, ignored)?.owner
+        if (winner == null) {
+            // Which includes "the only thing playing is a player you switched off". Publishing an
+            // empty snapshot rather than that player is what makes the rest of the app agree that
+            // nothing is playing — the idle timer, the screen-awake flag and the background all
+            // read this and nothing else.
             selected = null
             _snapshot.value = PlayerSnapshot()
             return
         }
 
-        val playing = candidates.filter { it.isPlayingNow() }
-        val winner = when {
-            playing.isNotEmpty() -> playing.maxByOrNull { lastPlayingAt[it.packageName] ?: 0L }
-            else -> candidates.maxByOrNull { lastPlayingAt[it.packageName] ?: 0L }
-        } ?: candidates.first()
-
         selected = winner
         _snapshot.value = winner.toSnapshot()
     }
 
-    private fun MediaController.hasUsableMetadata(): Boolean {
-        val md = metadata ?: return false
-        val title = md.getString(MediaMetadata.METADATA_KEY_TITLE)
-        return !title.isNullOrBlank()
-    }
-
-    private fun MediaController.isPlayingNow(): Boolean =
-        playbackState?.state == PlaybackState.STATE_PLAYING
+    /** Read once per publish, rather than metadata and state over again for each question. */
+    private fun MediaController.asCandidate(): Candidate<MediaController> = Candidate(
+        packageName = packageName,
+        hasMetadata = !metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank(),
+        isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING,
+        lastPlayingAt = lastPlayingAt[packageName] ?: 0L,
+        owner = this,
+    )
 
     /**
      * The queue entry after the one playing.
