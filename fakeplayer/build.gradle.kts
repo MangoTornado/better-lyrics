@@ -6,7 +6,7 @@ plugins {
 /**
  * A stand-in music player, for development only.
  *
- * Better Lyrics reads whatever media session the phone is playing, which makes the
+ * Melisma reads whatever media session the phone is playing, which makes the
  * interesting half of it impossible to exercise without a second app publishing one.
  * This is that second app: it publishes a real `MediaSession` with real metadata and a
  * playhead that actually advances, so the detection, the playhead extrapolation and the
@@ -16,11 +16,11 @@ plugins {
  * into the shipped app.
  */
 android {
-    namespace = "com.betterlyrics.fakeplayer"
+    namespace = "com.melisma.fakeplayer"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.betterlyrics.fakeplayer"
+        applicationId = "com.melisma.fakeplayer"
         minSdk = 29
         targetSdk = 36
         versionCode = 1

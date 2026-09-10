@@ -76,11 +76,11 @@ jobs:
           export BL_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
           ./gradlew :app:testDebugUnitTest :app:assembleRelease
           mv app/build/outputs/apk/release/app-release.apk \
-             "better-lyrics-${{ steps.version.outputs.name }}.apk"
+             "melisma-${{ steps.version.outputs.name }}.apk"
 
       - name: Verify it really is signed
         run: |
-          APK="better-lyrics-${{ steps.version.outputs.name }}.apk"
+          APK="melisma-${{ steps.version.outputs.name }}.apk"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/apksigner" verify --print-certs "$APK"
 
@@ -101,6 +101,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           NAME="${{ steps.version.outputs.name }}"
-          gh release create "v$NAME" "better-lyrics-$NAME.apk" \
+          gh release create "v$NAME" "melisma-$NAME.apk" \
             --title "v$NAME" \
             --notes-file release-notes.md

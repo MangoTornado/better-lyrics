@@ -1,9 +1,9 @@
 <resources>
-    <string name="app_name">Better Lyrics</string>
+    <string name="app_name">Melisma</string>
     <string name="notification_listener_label">Now-playing detection</string>
 
-    <string name="permission_title">Let Better Lyrics see what\'s playing</string>
-    <string name="permission_body">Better Lyrics reads the media session your music app publishes — track, artist, album, duration and the live playhead — so it can line lyrics up with the song. Android puts that behind “notification access”.\n\nNothing is uploaded except the track title and artist, and only to look up lyrics.</string>
+    <string name="permission_title">Let Melisma see what\'s playing</string>
+    <string name="permission_body">Melisma reads the media session your music app publishes — track, artist, album, duration and the live playhead — so it can line lyrics up with the song. Android puts that behind “notification access”.\n\nNothing is uploaded except the track title and artist, and only to look up lyrics.</string>
     <string name="permission_button">Open notification access</string>
 
     <string name="no_player_title">Nothing playing</string>

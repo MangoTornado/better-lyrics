@@ -23,7 +23,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "BetterLyrics"
+rootProject.name = "Melisma"
 include(":app")
 // Development-only stand-in music player; see fakeplayer/build.gradle.kts.
 include(":fakeplayer")

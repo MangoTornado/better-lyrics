@@ -1,12 +1,12 @@
 # Optional tokens
 
-**You do not need any of this.** Better Lyrics finds word-by-word lyrics for most music with
+**You do not need any of this.** Melisma finds word-by-word lyrics for most music with
 nothing configured at all — three of its sources need no account, and they are on by default.
 This page is for the cases where they come up short: an obscure track, a wrong match, or lyrics
 that exist only in a paid catalogue.
 
 Everything here is *your own* credential, read out of a browser session you are already signed in
-to. There is no Better Lyrics account and no server in between.
+to. There is no Melisma account and no server in between.
 
 | I want… | Paste this | Lasts |
 |---|---|---|

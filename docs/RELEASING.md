@@ -16,7 +16,10 @@ The workflow needs the release key. **Keep the keystore itself out of the reposi
 losing it means you can never ship an update that upgrades an already-installed copy.
 
 The local keystore lives at `~/.android/better-lyrics-release.jks`, and its path and
-passwords are in `keystore.properties`, which is gitignored. Read the values from there:
+passwords are in `keystore.properties`, which is gitignored. It kept that name through the
+rename to Melisma on purpose: the alias `better-lyrics` is written *inside* the keystore
+file, so renaming either would mean generating a new key — and a new key can never update
+an installed copy. A keystore you are creating fresh can be called anything. Read the values from there:
 
 ```bash
 cat keystore.properties
@@ -27,7 +30,7 @@ Then add four repository secrets. With the [GitHub CLI](https://cli.github.com):
 ```bash
 brew install gh && gh auth login          # if you do not have it yet
 
-REPO=MangoTornado/better-lyrics
+REPO=MangoTornado/melisma
 KS=$(grep '^storeFile='     keystore.properties | cut -d= -f2-)
 PW=$(grep '^storePassword=' keystore.properties | cut -d= -f2-)
 AL=$(grep '^keyAlias='      keystore.properties | cut -d= -f2-)

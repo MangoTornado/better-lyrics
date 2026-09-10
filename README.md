@@ -2,17 +2,17 @@
 
 <img src="docs/branding/icon-light.jpg" width="104" alt="" />
 
-# Better Lyrics
+# Melisma
 
 **Word-by-word karaoke lyrics for whatever your phone is already playing.**
 
 Spotify, YouTube Music, Apple Music, SoundCloud, a local player — anything that plays audio.
 No login, no account, and it works out of the box.
 
-[![Release](https://img.shields.io/github/v/release/MangoTornado/better-lyrics?display_name=tag&color=6c5ce7)](https://github.com/MangoTornado/better-lyrics/releases/latest)
+[![Release](https://img.shields.io/github/v/release/MangoTornado/melisma?display_name=tag&color=6c5ce7)](https://github.com/MangoTornado/melisma/releases/latest)
 [![Android 10+](https://img.shields.io/badge/Android-10%2B-3DDC84?logo=android&logoColor=white)](#install)
 [![Licence AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue)](LICENSE)
-[![CI](https://github.com/MangoTornado/better-lyrics/actions/workflows/ci.yml/badge.svg)](https://github.com/MangoTornado/better-lyrics/actions/workflows/ci.yml)
+[![CI](https://github.com/MangoTornado/melisma/actions/workflows/ci.yml/badge.svg)](https://github.com/MangoTornado/melisma/actions/workflows/ci.yml)
 
 </div>
 
@@ -43,6 +43,7 @@ No login, no account, and it works out of the box.
 - [FAQ](#faq)
 - [Building it](#building-it)
 - [Docs](#docs)
+- [The name](#the-name)
 - [Credits](#credits)
 
 ## What it does
@@ -92,10 +93,10 @@ A port of Spicy Lyrics' visual language, down to the curve constants:
 
 ## Install
 
-1. **Download the APK** from the [latest release](https://github.com/MangoTornado/better-lyrics/releases/latest)
+1. **Download the APK** from the [latest release](https://github.com/MangoTornado/melisma/releases/latest)
    and install it. Android will warn you about installing outside the Play Store; that is expected for
    any APK.
-2. **Open it and tap "Open notification access"**, then enable Better Lyrics in the list that appears
+2. **Open it and tap "Open notification access"**, then enable Melisma in the list that appears
    and come back. It picks the permission up on its own.
 3. **Play something.** Lyrics appear.
 
@@ -148,7 +149,7 @@ Skip this unless something is missing. Pasting your own credentials adds:
 | **Apple Music** | Word-by-word lyrics with official romanizations and translations |
 | **Musixmatch / NetEase** | Higher rate limits and a wider catalogue |
 
-They are read out of a browser session you are already signed in to — there is no Better Lyrics
+They are read out of a browser session you are already signed in to — there is no Melisma
 account and no server in between. They stay in the app's private storage and each is sent only to the
 service it belongs to.
 
@@ -190,7 +191,7 @@ also released automatically after ten idle minutes.
 
 **Is it on the Play Store / F-Droid?**
 
-No. Install the APK from [releases](https://github.com/MangoTornado/better-lyrics/releases/latest);
+No. Install the APK from [releases](https://github.com/MangoTornado/melisma/releases/latest);
 the app checks GitHub for updates itself and offers to install them.
 
 **Why is the APK 34 MB?**
@@ -228,6 +229,15 @@ More in **[docs/DEVELOPING.md](docs/DEVELOPING.md)**.
 | **[DEVELOPING.md](docs/DEVELOPING.md)** | Building, architecture, testing without a music app |
 | **[RELEASING.md](docs/RELEASING.md)** | Tagging a release, and checking an APK is really yours |
 | **[NOTICE.md](NOTICE.md)** | What came from where |
+
+## The name
+
+A **melisma** is one syllable sung across several notes — the held note that ripples instead of
+sitting still. It is the thing this app draws letter by letter, and it is what a lyric sheet cannot
+show you.
+
+(Formerly *Better Lyrics*, renamed because [another project](https://github.com/better-lyrics/better-lyrics)
+had the name first and does something different with it.)
 
 ## Credits
 

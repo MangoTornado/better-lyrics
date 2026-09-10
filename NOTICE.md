@@ -1,6 +1,6 @@
 # Credits and licences
 
-Better Lyrics is a **derivative work of [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics)**
+Melisma is a **derivative work of [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics)**
 by **Spikerko**, and is licensed under the **GNU Affero General Public License v3.0** as a
 result. See [LICENSE](LICENSE).
 

@@ -35,11 +35,11 @@ plugins {
 }
 
 android {
-    namespace = "com.betterlyrics.app"
+    namespace = "com.melisma.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.betterlyrics.app"
+        applicationId = "com.melisma.app"
         minSdk = 29
         targetSdk = 36
         // The release workflow derives both from the git tag; a local build gets the

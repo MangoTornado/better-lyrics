@@ -49,7 +49,7 @@ nothing installed.
 
 ```bash
 ./gradlew :fakeplayer:installDebug
-adb shell am start -n com.betterlyrics.fakeplayer/.FakePlayerActivity
+adb shell am start -n com.melisma.fakeplayer/.FakePlayerActivity
 ```
 
 On an emulator, `adb shell settings put secure enabled_notification_listeners …` is not enough — the
@@ -57,7 +57,7 @@ setting changes but the service is never bound. Use:
 
 ```bash
 adb shell cmd notification allow_listener \
-    com.betterlyrics.app.debug/com.betterlyrics.app.media.MediaNotificationListener
+    com.melisma.app.debug/com.melisma.app.media.MediaNotificationListener
 ```
 
 **Renderer preview** — in a debug build, the "nothing playing" screen offers a button that runs the
@@ -69,8 +69,8 @@ To attach a lyrics file to a track without the file picker, drop it straight int
 the filename is the cache key:
 
 ```bash
-adb shell "run-as com.betterlyrics.app.debug sh -c \
-  'cat > /data/data/com.betterlyrics.app.debug/files/local-lyrics/bohemian_rhapsody-queen-177.lrc'" \
+adb shell "run-as com.melisma.app.debug sh -c \
+  'cat > /data/data/com.melisma.app.debug/files/local-lyrics/bohemian_rhapsody-queen-177.lrc'" \
   < my.lrc
 ```
 

@@ -6,10 +6,10 @@
 # kotlinx.serialization generated serializers.
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.**
--keepclassmembers class com.betterlyrics.app.** {
+-keepclassmembers class com.melisma.app.** {
     *** Companion;
 }
--keepclasseswithmembers class com.betterlyrics.app.** {
+-keepclasseswithmembers class com.melisma.app.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
@@ -25,6 +25,6 @@
 # `addJavascriptInterface`. R8 sees an uncalled method on an otherwise unreferenced class and is
 # right to remove it, which in a release build means the harvest waits out its timeout and reports
 # a failure that never happens in debug.
--keepclassmembers class com.betterlyrics.app.lyrics.provider.SpotifyBrowserToken$TokenBridge {
+-keepclassmembers class com.melisma.app.lyrics.provider.SpotifyBrowserToken$TokenBridge {
     @android.webkit.JavascriptInterface <methods>;
 }

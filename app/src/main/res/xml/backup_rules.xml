@@ -11,6 +11,6 @@
 -->
 <full-backup-content>
     <include domain="sharedpref" path="." />
-    <exclude domain="sharedpref" path="better-lyrics-credentials.xml" />
+    <exclude domain="sharedpref" path="melisma-credentials.xml" />
     <include domain="file" path="local-lyrics" />
 </full-backup-content>
