@@ -87,7 +87,12 @@ fun LyricsView(
             val minPx = with(density) { (if (tight) 11 else 21).sp.toPx() }
             val maxPx = with(density) { (if (tight) 26 else 40).sp.toPx() }
             val byWidth = widthPx * (if (tight) 0.075f else 0.082f)
-            val byHeight = heightPx * (if (tight) 0.17f else 0.5f)
+            // The height term used to be half the viewport, which never bound anything: a phone
+            // held sideways is 350dp tall, and 175sp is not a constraint. So Cinema in landscape
+            // sized its type off a column *wider* than a portrait screen while having half the
+            // height to show it in, and the active line wrapped every time. A line's worth of
+            // height rather than half the page is what "how big should the words be" means.
+            val byHeight = heightPx * (if (tight) 0.17f else 0.085f)
             minOf(byWidth, byHeight).coerceIn(minPx, maxPx) * settings.fontScale
         }
 

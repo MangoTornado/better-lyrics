@@ -783,17 +783,13 @@ private fun ViewControls(
         }
 
         // Scrollable: there are more controls than fit across a phone, and hiding half of
-        // them behind an overflow menu would only make them harder to reach. Pushed to the far
-        // edge when they do fit, so they read as belonging to the bar rather than trailing the
-        // text they happen to sit beside.
+        // them behind an overflow menu would only make them harder to reach. Beside the labels
+        // rather than pushed to the far edge — across a landscape screen that left a hand's width
+        // of nothing between the credit and the buttons, and they stopped reading as one bar.
         val chips: @Composable (Modifier) -> Unit = { modifier ->
             Row(
                 modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = if (sideBySide) {
-                    Arrangement.spacedBy(8.dp, Alignment.End)
-                } else {
-                    Arrangement.spacedBy(8.dp)
-                },
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (romanizationAvailable) {
                     LabelChip(

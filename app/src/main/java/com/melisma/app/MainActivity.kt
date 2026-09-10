@@ -19,6 +19,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.melisma.app.settings.ViewMode
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.melisma.app.ui.PlayerScreen
 import com.melisma.app.ui.theme.MelismaTheme
@@ -59,6 +63,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Android draws a scrim behind the navigation bar to keep its buttons legible over
+        // whatever is underneath. Over a full-screen lyric page that reads as a grey strip stuck
+        // to the edge; the app's own background is dark enough for the buttons without it.
+        window.isNavigationBarContrastEnforced = false
 
         ContextCompat.registerReceiver(
             this,
@@ -103,11 +111,13 @@ class MainActivity : ComponentActivity() {
                     // Switching battery saver on has to let go of the screen there and then, not
                     // at the next pause.
                     releaseScreen = saving.releaseScreen,
+                    cinema = settings.viewMode == ViewMode.CINEMA,
                 )
             }.distinctUntilChanged().collect {
                 applyPopupParams(it.isPlaying)
                 // Pausing must let the screen time out, and it is the same signal.
                 applyKeepScreenOn()
+                applyImmersive(it.cinema)
             }
         }
     }
@@ -227,7 +237,11 @@ class MainActivity : ComponentActivity() {
         val keepScreenOn: Boolean,
         /** Also not a popup input, and here for the same reason. */
         val releaseScreen: Boolean,
+        /** And this one, which decides whether the navigation bar is in the way. */
+        val cinema: Boolean,
     )
+
+
 
     /**
      * The buttons on the floating window.
@@ -339,6 +353,27 @@ class MainActivity : ComponentActivity() {
      * Re-applied whenever playback changes, not once on resume, or a track ending would leave the
      * flag set for as long as the app stayed open.
      */
+    /**
+     * Get the navigation bar out of the way in Cinema view.
+     *
+     * Cinema is the album art beside the words with nothing else on screen, and held sideways the
+     * bar is a column down one edge — it covered the transport buttons and took width the lyrics
+     * wanted. Hidden rather than dimmed, because a translucent bar still reserves its inset.
+     *
+     * Transient, so a swipe from the edge brings it back for anyone using the three buttons rather
+     * than gestures, and it goes away again on its own.
+     */
+    private fun applyImmersive(cinema: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (cinema) {
+            controller.hide(WindowInsetsCompat.Type.navigationBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.navigationBars())
+        }
+    }
+
     private fun applyKeepScreenOn() {
         val wanted = container.settings.current.keepScreenOn &&
             container.media.snapshot.value.playback.isPlaying &&
