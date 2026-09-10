@@ -1,16 +1,22 @@
-<img src="docs/branding/icon-light.jpg" width="88" align="left" alt="" hspace="14" />
+<div align="center">
+
+<img src="docs/branding/icon-light.jpg" width="104" alt="" />
 
 # Better Lyrics
 
-A standalone Android app that shows word-by-word synced lyrics for whatever your phone
-is playing — Spotify, YouTube Music, Apple Music, a local player, anything — with the
-look and motion of [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics) from [Spicetify](https://github.com/spicetify/cli).
+**Word-by-word karaoke lyrics for whatever your phone is already playing.**
 
-No Spotify login. No account of any kind.
+Spotify, YouTube Music, Apple Music, SoundCloud, a local player — anything that plays audio.
+No login, no account, and it works out of the box.
 
-> **Licence, up front:** this is a **port of Spicy Lyrics**, which is AGPL-3.0. So this is
-> AGPL-3.0 too. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) — the second one is the
-> honest accounting of what came from where.
+[![Release](https://img.shields.io/github/v/release/MangoTornado/better-lyrics?display_name=tag&color=6c5ce7)](https://github.com/MangoTornado/better-lyrics/releases/latest)
+[![Android 10+](https://img.shields.io/badge/Android-10%2B-3DDC84?logo=android&logoColor=white)](#install)
+[![Licence AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue)](LICENSE)
+[![CI](https://github.com/MangoTornado/better-lyrics/actions/workflows/ci.yml/badge.svg)](https://github.com/MangoTornado/better-lyrics/actions/workflows/ci.yml)
+
+</div>
+
+![Cinema view in landscape](docs/cinema-landscape.png)
 
 | Active line, mid-word | Furigana over kanji | Instrumental gap |
 |---|---|---|
@@ -20,292 +26,220 @@ No Spotify login. No account of any kind.
 |---|---|---|
 | ![](docs/cinema-portrait.png) | ![](docs/popup-lyrics.png) | ![](docs/copy-lines.png) |
 
-![Cinema view in landscape](docs/cinema-landscape.png)
+> [!NOTE]
+> This is a port of [**Spicy Lyrics**](https://github.com/Spikerko/spicy-lyrics) (a
+> [Spicetify](https://github.com/spicetify/cli) extension) to Android — its look, its motion and its
+> lyric model. Spicy Lyrics is AGPL-3.0, so this is too. [NOTICE.md](NOTICE.md) is the honest
+> accounting of what came from where.
 
-## How it works
+## Contents
 
-Android makes every media app publish a **media session**: the track, the artist, the
-album, the duration, the artwork, and — the part that matters — a playhead with the
-timestamp it was last reported at. Better Lyrics reads that session, extrapolates the
-playhead from the wall clock between updates, looks the track up, and draws the words.
+- [What it does](#what-it-does)
+- [Install](#install)
+- [Using it](#using-it)
+- [Where the lyrics come from](#where-the-lyrics-come-from)
+- [Optional tokens](#optional-tokens)
+- [Permissions](#permissions)
+- [FAQ](#faq)
+- [Building it](#building-it)
+- [Docs](#docs)
+- [Credits](#credits)
 
-That is the whole trick, and it is why the app needs no integration with any particular
-player. Reading other apps' sessions is gated behind Android's "notification access"
-switch, so the app declares a `NotificationListenerService` that does nothing with
-notifications — it exists purely to hold that permission.
+## What it does
 
-```
-Spotify (or anything)  ──►  MediaSession  ──►  MediaSessionRepository
-                                                       │  track + playhead
-                                                       ▼
-                                              LyricsRepository
-                                        (cache → providers in parallel)
-                                                       │  timed words
-                                                       ▼
-                                romanize / furigana → translate → LyricsRenderer
-```
+🎤 **Word-by-word karaoke**, not a scrolling teleprompter — each syllable fills as it is sung, lifts,
+swells and glows, and a note held over a second breaks into individually animated letters.
 
-## The rendering
+🎧 **Follows any player.** It reads the media session Android makes every audio app publish, so
+there is nothing to connect and no service to log into.
+
+🈶 **Romanization and furigana** for Japanese (through a real dictionary, so kanji get the right
+reading), Chinese, Korean, Cyrillic and Greek — per syllable, so the karaoke fill still works.
+
+🌍 **Translation on the device** via ML Kit. The lyrics never leave your phone.
+
+🪟 **Popup lyrics** in a floating window over other apps, plus **Cinema** view with the album art
+beside the words, and a **compact**, **minimal** and **simple** mode.
+
+🎨 **Living background** drawn from the album art, drifting on long non-repeating periods and paced
+by the song's tempo.
+
+📋 **Copy a line** by holding it, or pick out several and copy them together.
+
+🔋 **Stops when the music does.** Nothing animates, nothing polls, and after ten idle minutes the app
+lets go of everything keeping it alive.
+
+<details>
+<summary>The rendering, in detail</summary>
 
 A port of Spicy Lyrics' visual language, down to the curve constants:
 
-- Each syllable is filled by a soft gradient that sweeps down through it as it is sung,
-  while it lifts, swells past its resting size, and glows.
-- A syllable held for over a second breaks into **individually animated letters**, so a
-  held note ripples instead of sitting bright.
-- Every other line is drawn as a **blur of itself**, with the radius growing the further
-  it is from the current line. That is what gives the page its depth.
-- Instrumental gaps of 3 seconds or more become **three dots** that breathe in turn.
+- Each syllable is filled by a soft gradient sweeping down through it as it is sung, while it lifts,
+  swells past its resting size, and glows.
+- A syllable held for over a second breaks into **individually animated letters**, so a held note
+  ripples instead of sitting bright.
+- Every other line is drawn as a **blur of itself**, with the radius growing the further it is from
+  the current line. That is what gives the page its depth.
+- Instrumental gaps of three seconds or more become **three dots** that breathe in turn.
 - Duet lines pin to the opposite edge; backing vocals render smaller under their lead.
-- Songwriters and the lyrics source close the song, inside the scroll rather than in the
-  chrome.
+- Sung lines fade out rather than snapping back, so a breath between lines reads as one.
 - Scrolling is spring-driven and hands control back to you the moment you drag.
-- The background is the album art reduced to a colour field and drifted past itself on
-  long, non-repeating periods.
+- Songwriters and the lyrics source close the song, inside the scroll rather than in the chrome.
+- Backgrounds: **Living** (the drifting colour field), **Auto**, **Cover art** with a blur slider,
+  **Artist**, **Colour**, **Black**.
 
-## Views
+</details>
+
+## Install
+
+1. **Download the APK** from the [latest release](https://github.com/MangoTornado/better-lyrics/releases/latest)
+   and install it. Android will warn you about installing outside the Play Store; that is expected for
+   any APK.
+2. **Open it and tap "Open notification access"**, then enable Better Lyrics in the list that appears
+   and come back. It picks the permission up on its own.
+3. **Play something.** Lyrics appear.
+
+That is the whole setup. Android 10 or newer.
+
+## Using it
 
 | | |
 |---|---|
-| **Lyrics** | Words fill the screen, with a now-playing bar underneath. |
-| **Cinema** | Album art, title, artist, album, scrubber and transport beside the words — above them on a phone held upright, to the side when it is turned. A button swaps which side. |
-| **Popup** | A floating window over other apps. Shrinks into it automatically when you leave, the way YouTube does, in **wide (16:9)**, **tall (9:16)** or **square**. The transport buttons on the window are the system's, driven by the app. |
-| **Compact** | Tighter type and spacing, for split screen. |
-| **Minimal** | Sung lines shrink and leave the page instead of dimming. |
-| **Simple** | Flatter contrast, no letter-by-letter emphasis. |
+| **Tap a line** | Jumps the song to it |
+| **Hold a line** | Copies it |
+| **Drag** | Scrolls freely; the lyrics take back over a moment after you let go |
+| **Copy button** | Pick out several lines, then copy those or all of them |
+| **Views** | *Lyrics* fills the screen; *Cinema* puts the album art, scrubber and transport beside the words; *Popup* floats over other apps and shrinks into place when you leave, like YouTube |
 
-Backgrounds: **Living** (the drifting colour field), **Auto** (still in the floating
-window), **Cover art** with a blur slider, **Artist**, **Colour**, **Black**.
+**The one setting most people end up wanting is *Sync offset*.** Players and audio routes add their
+own latency. If the highlight reaches a word *before* you hear it, go negative — and **Bluetooth
+earbuds always need a negative value**, because they run 150–250 ms behind what the player reports.
 
-## Renewing the Spotify token
+Every setting has a one-line description, and the **?** in the settings header expands a longer
+explanation under each one. There is also a welcome guide in *Settings → About*.
 
-Spotify closed the endpoint that traded an `sp_dc` cookie for an access token, so the token has to
-be copied out of the web player by hand — and it lasts about an hour, which makes it an errand
-rather than a setting.
+## Where the lyrics come from
 
-**Settings → Developer → Renew that token automatically** removes the errand. The only thing that
-still mints a token is the player itself, and Android ships a Chromium to run it in: this loads
-open.spotify.com in a WebView with your cookie and reads the token the player is given. Nothing is
-drawn on screen, and the view is destroyed as soon as a token arrives. One launch an hour at most —
-the token is cached until its own `exp` claim says otherwise.
+Every enabled source is asked **at once** and the best answer wins — word-by-word beats line-by-line
+beats unsynced. Order only breaks ties: hold a row's handle in *Settings → Where lyrics come from*
+and drag it.
 
-That is a different thing from reproducing the signature the player signs its token request with.
-Doing *that* would mean lifting a secret to defeat a check, and this app does not: see
-`SpotifyWebToken.BLOCKED_BY_SPOTIFY`. Here the player signs its own request, as itself, with your
-cookie, and the token that comes back is one your own browser would have received.
-
-It is behind developer options, off by default, because it is still automated access to a service
-whose terms discourage it. For one person on their own device that is a call they can make; it is
-not something to ship switched on to everybody who installs a release.
-
-## What a Spotify cookie adds
-
-Beyond its own lyrics, the same `sp_dc`-derived token buys three things a media session
-cannot give you — all behind one switch, *Use extras from Spotify*:
-
-- **The artist's image**, which is what Spicy Lyrics' *Artist Header* background is.
-- **The cover at full size** (640 px), instead of the 200–300 px thumbnail most players
-  publish. The background, the palette and the Cinema view all improve.
-- **The song's tempo**, which paces how fast the background drifts — a ballad no longer
-  churns like a dance track.
-
-Spicy Lyrics reads the true wide *header banner* through Spotify's internal GraphQL
-gateway, which needs a persisted-query hash that changes with every web-player release.
-This uses the documented endpoint and takes the artist image instead: the same artwork,
-square rather than letterboxed, indistinguishable once blurred into a background, and it
-does not break when Spotify ships an update.
-
-## Language
-
-**Romanization** turns non-Latin lyrics into something singable, per syllable, so the
-karaoke fill still works:
-
-- **Japanese** goes through Kuromoji, because kanji have no fixed reading — 生 is *ki*,
-  *sei*, *nama* or *i* depending on the word. It also records where the word boundaries
-  fall, so 君の声が becomes `kimi no koe ga` while 聞こえる stays `kikoeru`.
-- **Chinese, Korean, Cyrillic and Greek** use the ICU transliterators built into Android.
-- A romanization the provider already shipped is never overwritten.
-
-**Furigana** prints the kana reading in small type over the kanji, the way a songbook
-does — in **hiragana** or **katakana**. It comes out of the same dictionary lookup as the
-romaji, and only shows while romanization is off, because it is a gloss *over* the
-original text.
-
-**Translation** runs on-device via ML Kit, so the lyrics never leave the phone. Each
-language is a one-off ~30 MB model download, and nothing is fetched until you turn it on.
-Provider-supplied translations take priority.
-
-## Finding your way around
-
-On first launch a **welcome guide** says plainly what is required (one permission), what
-works with no setup at all, and what each optional token adds. It is in *Settings → About*
-if you want it again.
-
-Every setting carries a one-line description, and the **?** in the settings header expands
-a longer explanation under each one — what it changes, and why you might want it.
-
-## Copying
-
-- **Hold** a line to copy it, with a highlight under your finger while you do.
-- The **copy button** starts selection: tap lines to pick them out, then Copy — or All.
-- **Copy all the lyrics** is in Settings, under *This track*.
-
-## Where lyrics come from
-
-Every enabled source is asked at once and the best answer wins — word-by-word beats
-line-by-line beats unsynced. Order breaks ties: hold a row's handle in **Settings → Where
-lyrics come from** and drag it up or down.
-
-| Provider | Timing | Needs |
+| Source | Timing | Needs |
 |---|---|---|
-| Your own files | up to word | `.lrc` / `.ttml` you import. Always wins. |
-| Apple Music | **word** | A developer token and a music user token. Also brings official romanizations and translations. |
-| Spotify | line | Your `sp_dc` cookie. The lyrics the Spotify app shows, matched to the exact track. |
-| NetEase Cloud Music | **word** | Nothing. Also brings hand-checked romanization and translation — the best source for East Asian music. |
-| Musixmatch | **word** | Nothing (a token of your own widens the catalogue). |
-| LRCLIB | line | Nothing. Open community database. |
+| **Your own files** | up to word | `.lrc` / `.ttml` you import. Always wins. |
+| **AMLL TTML Database** | **word** | **Nothing.** Community-timed, hand-made, public domain. |
+| **NetEase Cloud Music** | **word** | **Nothing.** Best for Japanese, Korean and Chinese — ships hand-checked romanization and translation. |
+| **Musixmatch** | **word** | **Nothing.** Most Western music. |
+| **LRCLIB** | line | **Nothing.** Open community database. |
+| **Spotify** | line | An access token — see [tokens](#optional-tokens). |
+| **Apple Music** | **word** | Two tokens. The best data there is: official romanizations and translations. |
+| **Your own cache server** | any | Optional, for putting one server in front of the free ones — [CACHE-SERVER.md](docs/CACHE-SERVER.md). |
 
-Every token, cookie and endpoint has a field in **Settings → Tokens and endpoints**,
-including self-hosted LRCLIB and NetEase instances. A provider with nothing to
-authenticate with is skipped rather than queried, and Settings says which one it is
-waiting on.
+**Four sources need no account at all** — the four in the middle — and they are the ones switched on
+when you install it. The rest are there for the tracks the free ones miss.
 
-Spikerko's own **Spicy Lyrics API** is deliberately *not* wired up: it would mean posting
-someone's Spotify token to a third party and unpacking a bespoke binary payload, and it is
-his service to run, not this app's to lean on.
+## Optional tokens
+
+Skip this unless something is missing. Pasting your own credentials adds:
+
+| | |
+|---|---|
+| **Spotify** | Its own lyrics, the cover at full size, the artist's image, and the song's tempo |
+| **Apple Music** | Word-by-word lyrics with official romanizations and translations |
+| **Musixmatch / NetEase** | Higher rate limits and a wider catalogue |
+
+They are read out of a browser session you are already signed in to — there is no Better Lyrics
+account and no server in between. They stay in the app's private storage and each is sent only to the
+service it belongs to.
+
+**→ [docs/TOKENS.md](docs/TOKENS.md) has step-by-step instructions for every one of them**, including
+how to stop having to replace the Spotify token every hour.
+
+A source with nothing to authenticate with is skipped rather than queried, so leaving one enabled
+while you go and find its token costs nothing.
+
+## Permissions
+
+| Permission | Why | What leaves your phone |
+|---|---|---|
+| **Notification access** | The only way Android lets an app read another app's media session. The service that holds it ignores notifications entirely. | Nothing |
+| **Internet**, network state | Looking lyrics up, and noticing when there is no connection to look with. | The track title, artist, album and duration, to the lyrics sources you have enabled |
+| **Install packages** | Only when you accept an in-app update, which goes through Android's own confirmation screen. | Nothing |
+
+There is no analytics, no crash reporting and no account. Lyrics are cached on the device for 30
+days and nowhere else.
+
+## FAQ
+
+**Do I need Spotify Premium, or a Spotify account?**
+
+No. The app reads what your phone is playing, whatever is playing it. It never talks to Spotify unless
+you paste a token yourself.
+
+**Does it work with YouTube Music / SoundCloud / a local player?**
+
+Yes — anything that publishes a media session, which is everything that plays audio on Android. You
+can also switch a player off under *Settings → Players to follow*, which is how you stop a podcast or
+a video being looked up as a song.
+
+**Why does it want notification access? That sounds like a lot.**
+
+Because it is the only way Android will let an app read another app's playback position. The service
+that holds the permission has an empty `onNotificationPosted` — it never reads a notification. It is
+also released automatically after ten idle minutes.
+
+**Is it on the Play Store / F-Droid?**
+
+No. Install the APK from [releases](https://github.com/MangoTornado/better-lyrics/releases/latest);
+the app checks GitHub for updates itself and offers to install them.
+
+**Why is the APK 34 MB?**
+
+The Japanese dictionary and the offline translation engine are nearly all of it. Both are the price of
+getting kanji readings right and of translating without sending your lyrics anywhere.
+
+**Lyrics are slightly out of time.**
+
+*Settings → Timing → Sync offset.* Negative for Bluetooth. See [above](#using-it).
+
+**A track has no lyrics, or the wrong ones.**
+
+*Settings → This track → Look this track up again* forces a fresh lookup. If nothing has it, you can
+import a `.lrc` or `.ttml` file yourself, and that always wins.
 
 ## Building it
 
-Needs the Android SDK (platform 36) and a JDK 17+.
-
 ```bash
-./gradlew :app:assembleDebug          # debug APK (~83 MB: two architectures, unminified)
-./gradlew :app:assembleRelease        # release APK (~34 MB: arm64 only, minified)
-./gradlew :app:testDebugUnitTest      # unit tests
+./gradlew :app:assembleDebug      # debug APK
+./gradlew :app:assembleRelease    # release APK (unsigned without a keystore)
+./gradlew :app:testDebugUnitTest  # unit tests
 ```
 
-With a `keystore.properties` present (see `keystore.properties.example`) the release APK
-comes out **signed**; without one the same command still works and produces an unsigned
-APK, so a fresh clone never needs anybody's key.
+Needs the Android SDK (platform 36) and a JDK 17+. A fresh clone never needs anybody's signing key.
+More in **[docs/DEVELOPING.md](docs/DEVELOPING.md)**.
 
-## Releases
+## Docs
 
-Pushing a `v*` tag builds, signs and publishes an APK to GitHub Releases. The version name
-comes from the tag; the version code from the run number.
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-Four repository secrets are needed once — **[docs/RELEASING.md](docs/RELEASING.md)** has the
-commands, and the certificate fingerprint so you can check an APK is really yours.
-
-## Setting it up on a phone
-
-1. Install, open, and tap **Open notification access**; enable Better Lyrics in the list.
-   Come back to the app — it picks the permission up on its own, retrying for a few
-   seconds while the system binds the listener.
-2. Play something. Lyrics appear.
-3. Optional: paste any tokens you have into **Settings → Tokens and endpoints**.
-
-The one control most people end up wanting is **Sync offset**. Players and audio routes
-add their own latency, and this nudges every timestamp to compensate.
-
-Which way: if the highlight reaches a word *before* you hear it, go negative. **Bluetooth
-needs a negative value** — the player reports its position in the file, but the earbuds are
-150–250 ms behind that, so the lyrics run ahead of your ears and want holding back.
-
-## Performance
-
-The lyrics canvas is one draw node for the whole page, so playback costs **no
-recomposition at all** — the frame loop only invalidates the draw phase. On top of that:
-
-- The canvas is its own render node, so a per-frame lyric redraw does not drag the
-  background into being re-rasterised with it. This was worth roughly **8×** in measured
-  frame time.
-- Non-active lines are drawn as one pass per wrapped row rather than one per syllable.
-- The drifting background publishes at ~30 fps, not 60: its layers move on 30–70 second
-  orbits, so the other half of the frames were redrawing three full-screen layers for a
-  change nobody can see. A still background is cached as a layer and re-blitted.
-- **Frames stop when nothing is moving.** Once a paused song has settled, the lyrics stop
-  drawing entirely — measured at 55 frames per 8 s while playing against 8 while paused.
-- **A paused song stops everything else too.** The background's drift and the scrolling
-  title are the only other things on this screen that animate on their own account, and
-  both stop with the music. One animation left running decides the whole app's idle
-  behaviour, however cheap it is by itself: the frame pipeline cannot idle while anything
-  is still asking to be drawn.
-
-Absolute frame times were measured on a software-rendered emulator and are not meaningful
-as such; the ratios above are.
-
-Two more things happen away from the screen. The app **stands its notification listener
-down** after ten minutes with nothing playing and no window of its own on screen — that
-binding is what keeps the process resident, so giving it back is what lets the app actually
-close; the timeout is under *Settings → Battery*. And it **follows the system's battery
-saver**, holding the background still and skipping the early next-track lookup, with a
-switch per measure so anything that gets in the way can be turned off — including the one
-that is off by default, letting the screen time out mid-song.
-
-## Looking at it while developing
-
-Two affordances exist because the interesting half of this app needs a second app playing
-music:
-
-- **`:fakeplayer`** is a separate APK that publishes a real media session with a real
-  advancing playhead, so detection, extrapolation and the transport controls can be
-  exercised on an emulator with no music service installed.
-
-  ```bash
-  ./gradlew :fakeplayer:installDebug
-  adb shell am start -n com.betterlyrics.fakeplayer/.FakePlayerActivity
-  ```
-
-  On an emulator, `adb shell settings put secure enabled_notification_listeners …` is not
-  enough — the setting changes but the service is never bound. Use:
-
-  ```bash
-  adb shell cmd notification allow_listener \
-      com.betterlyrics.app.debug/com.betterlyrics.app.media.MediaNotificationListener
-  ```
-
-- **Renderer preview** — in a debug build, the "nothing playing" screen offers a button
-  that runs the renderer against a synthetic song on a looping clock. It covers the cases
-  that are easy to get wrong: letter-level emphasis, Japanese with romanization and
-  furigana, a duet line, a backing vocal, a translated line, and interludes at both ends.
-
-To attach a lyrics file to a track without the file picker, drop it straight into the
-app's store — the filename is the cache key:
-
-```bash
-adb shell "run-as com.betterlyrics.app.debug sh -c \
-  'cat > /data/data/com.betterlyrics.app.debug/files/local-lyrics/bohemian_rhapsody-queen-177.lrc'" \
-  < my.lrc
-```
-
-Also worth knowing:
-
-- **The APK is large** (~34 MB release). Kuromoji's dictionary and ML Kit's translation engine
-  are nearly all of it. Both are the price of correct Japanese readings and offline
-  translation; both could become on-demand downloads later.
-- **A release build packages `arm64-v8a` only**, which is every phone made in the last decade.
-  ML Kit ships a ~17 MB native library per architecture, so including x86_64 was a third of
-  the download for a case that never happens — nobody installs a release build on an emulator.
-  Debug builds keep both.
-- **Right-to-left lyrics** animate per word, not per syllable: splitting an Arabic or
-  Hebrew run into syllables breaks the letter joins.
-- **Musixmatch, Spotify and Apple Music** are undocumented endpoints. They are treated as
-  optional throughout — a failure drops the provider, never the app.
-- **Depth blur** relies on drawing text as transparent glyphs plus a shadow layer. If it
-  renders oddly on some device, *Depth blur* in Settings turns it off.
-- **Furigana on a syllable inside a longer word** takes a proportional slice of that
-  word's reading. Approximate per syllable, but it never loses or repeats a sound.
+| | |
+|---|---|
+| **[TOKENS.md](docs/TOKENS.md)** | Every optional token, step by step |
+| **[DEVELOPER-OPTIONS.md](docs/DEVELOPER-OPTIONS.md)** | The developer menu, and what each switch does |
+| **[CACHE-SERVER.md](docs/CACHE-SERVER.md)** | The request/response contract for a lyrics server of your own |
+| **[DEVELOPING.md](docs/DEVELOPING.md)** | Building, architecture, testing without a music app |
+| **[RELEASING.md](docs/RELEASING.md)** | Tagging a release, and checking an APK is really yours |
+| **[NOTICE.md](NOTICE.md)** | What came from where |
 
 ## Credits
 
-See **[NOTICE.md](NOTICE.md)**, and *Settings → Credits and licences* in the app itself.
-The short version: this is [**Spicy Lyrics**](https://github.com/Spikerko/spicy-lyrics) by
-Spikerko, read onto Android — its look, its animation curves, its lyric model and its TTML
-dialect. The spring is a port of [Fraktality's `spr`](https://github.com/Fraktality/spr)
-(MIT) and the curves of `cubic-spline` (MIT).
-[**Beautiful Lyrics**](https://github.com/surfbryce/beautiful-lyrics) by surfbryce is prior
-art and a reference point; no code from it is used.
+This is [**Spicy Lyrics**](https://github.com/Spikerko/spicy-lyrics) by **Spikerko**, read onto
+Android — its look, its animation curves, its lyric model and its TTML dialect. The spring is a port
+of [Fraktality's `spr`](https://github.com/Fraktality/spr) (MIT) and the curves of `cubic-spline`
+(MIT). The word-by-word lyrics that arrive with no account come from the
+[**AMLL TTML Database**](https://github.com/amll-dev/amll-ttml-db), hand-timed by its contributors
+and dedicated to the public domain. [**Beautiful Lyrics**](https://github.com/surfbryce/beautiful-lyrics)
+by surfbryce is prior art and a reference point; no code from it is used.
+
+Lyrics belong to their writers and publishers. None of the sources here are affiliated with this app.
+
+Licensed **AGPL-3.0** — see [LICENSE](LICENSE), [NOTICE.md](NOTICE.md), and *Settings → Credits and
+licences* in the app itself.

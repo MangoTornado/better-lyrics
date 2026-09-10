@@ -200,9 +200,11 @@ In both modes:
 
 - A file the user imported for a track still wins outright, and is answered without
   asking anything.
-- Answers are cached on the phone for 30 days (misses for 2), so the server is asked once
-  per track per month at most. **Settings → This track → Look this track up again** drops
-  that entry and forces a fresh request, which is the button to use while iterating.
+- Answers are cached on the phone for 30 days, so the server is asked once per track per
+  month at most. A **miss is not cached at all** — a track it could not answer today is
+  asked about again on the next play, which is what you want while the server is filling
+  up. **Settings → This track → Look this track up again** drops a stored answer and forces
+  a fresh request, which is the button to use while iterating.
 - Each provider gets 12 seconds before it is abandoned.
 
 ## Redistribution
