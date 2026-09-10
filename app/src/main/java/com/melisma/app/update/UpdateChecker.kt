@@ -40,7 +40,7 @@ object UpdateChecker {
      * code should not take the address of that code from anywhere a mistake or a malicious
      * link could reach.
      */
-    const val REPOSITORY = "MangoTornado/melisma"
+    const val REPOSITORY = "MelismaApp/melisma"
 
     const val RELEASES_URL = "https://github.com/$REPOSITORY/releases"
 

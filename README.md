@@ -9,10 +9,10 @@
 Spotify, YouTube Music, Apple Music, SoundCloud, a local player — anything that plays audio.
 No login, no account, and it works out of the box.
 
-[![Release](https://img.shields.io/github/v/release/MangoTornado/melisma?display_name=tag&color=6c5ce7)](https://github.com/MangoTornado/melisma/releases/latest)
+[![Release](https://img.shields.io/github/v/release/MelismaApp/melisma?display_name=tag&color=6c5ce7)](https://github.com/MelismaApp/melisma/releases/latest)
 [![Android 10+](https://img.shields.io/badge/Android-10%2B-3DDC84?logo=android&logoColor=white)](#install)
 [![Licence AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue)](LICENSE)
-[![CI](https://github.com/MangoTornado/melisma/actions/workflows/ci.yml/badge.svg)](https://github.com/MangoTornado/melisma/actions/workflows/ci.yml)
+[![CI](https://github.com/MelismaApp/melisma/actions/workflows/ci.yml/badge.svg)](https://github.com/MelismaApp/melisma/actions/workflows/ci.yml)
 
 </div>
 
@@ -93,7 +93,7 @@ A port of Spicy Lyrics' visual language, down to the curve constants:
 
 ## Install
 
-1. **Download the APK** from the [latest release](https://github.com/MangoTornado/melisma/releases/latest)
+1. **Download the APK** from the [latest release](https://github.com/MelismaApp/melisma/releases/latest)
    and install it. Android will warn you about installing outside the Play Store; that is expected for
    any APK.
 2. **Open it and tap "Open notification access"**, then enable Melisma in the list that appears
@@ -191,7 +191,7 @@ also released automatically after ten idle minutes.
 
 **Is it on the Play Store / F-Droid?**
 
-No. Install the APK from [releases](https://github.com/MangoTornado/melisma/releases/latest);
+No. Install the APK from [releases](https://github.com/MelismaApp/melisma/releases/latest);
 the app checks GitHub for updates itself and offers to install them.
 
 **Why is the APK 34 MB?**

@@ -49,7 +49,7 @@ business answering strangers. Put its key in **Cache server key** and the app se
 build works against both.
 
 That is the split
-[better-lyrics-server](https://github.com/MangoTornado/better-lyrics-server) implements: its
+[melisma-server](https://github.com/MelismaApp/melisma-server) implements: its
 admin surface, the only part that can read a token, always demands the key; a lookup from the
 local network does not.
 

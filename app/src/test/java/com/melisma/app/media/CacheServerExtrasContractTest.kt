@@ -11,7 +11,7 @@ import org.junit.Test
  * of them renames a field — and the failure is invisible in use, because a response the app
  * cannot read is indistinguishable from a track the server has never seen.
  *
- * The body below was captured from `better-lyrics-server` at `GET /v1/extras`, not written by
+ * The body below was captured from `melisma-server` at `GET /v1/extras`, not written by
  * hand.
  */
 class CacheServerExtrasContractTest {

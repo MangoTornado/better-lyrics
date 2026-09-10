@@ -15,7 +15,7 @@ import org.robolectric.annotation.Config
  * The wire contract with a cache server, tested against a response a real one actually sent.
  *
  * `docs/CACHE-SERVER.md` describes it, but a document cannot fail. This can: the fixture is a
- * captured reply from better-lyrics-server, so if either side drifts — the envelope shape, the
+ * captured reply from melisma-server, so if either side drifts — the envelope shape, the
  * TTML dialect, the field the credit lives in — the build says so instead of the app quietly
  * showing no lyrics. A cache server that returns something unreadable looks exactly like a
  * track nobody has transcribed, which is the failure worth making loud.
@@ -90,7 +90,7 @@ class CacheServerContractTest {
     @Test
     fun `the metadata comment the server writes is not mistaken for content`() {
         // It records which sources the merge drew on. A parser that surfaced it would put
-        // "merged by better-lyrics-server" on screen as a lyric.
+        // "merged by melisma-server" on screen as a lyric.
         val document = provider.documentFrom(fixture())!!
         assertTrue(document.lines.none { it.text.contains("merged by") })
     }

@@ -30,7 +30,7 @@ Then add four repository secrets. With the [GitHub CLI](https://cli.github.com):
 ```bash
 brew install gh && gh auth login          # if you do not have it yet
 
-REPO=MangoTornado/melisma
+REPO=MelismaApp/melisma
 KS=$(grep '^storeFile='     keystore.properties | cut -d= -f2-)
 PW=$(grep '^storePassword=' keystore.properties | cut -d= -f2-)
 AL=$(grep '^keyAlias='      keystore.properties | cut -d= -f2-)

@@ -57,7 +57,7 @@ endpoint run by volunteers is asked once per song instead of once per listener p
   server holding an Apple Music token should not answer strangers.
 
 The full request and response contract is in **[CACHE-SERVER.md](CACHE-SERVER.md)**, and
-[better-lyrics-server](https://github.com/MangoTornado/better-lyrics-server) implements it.
+[melisma-server](https://github.com/MelismaApp/melisma-server) implements it.
 
 ### How to use it
 

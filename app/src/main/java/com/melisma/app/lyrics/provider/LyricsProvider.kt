@@ -233,7 +233,7 @@ object Http {
      * organisation entirely — so anyone tracing traffic here was sent to strangers.
      */
     private val USER_AGENT =
-        "Melisma/${BuildConfig.VERSION_NAME} (Android; https://github.com/MangoTornado/melisma)"
+        "Melisma/${BuildConfig.VERSION_NAME} (Android; https://github.com/MelismaApp/melisma)"
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
