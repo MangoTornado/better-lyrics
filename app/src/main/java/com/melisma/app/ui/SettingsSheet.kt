@@ -54,6 +54,7 @@ import com.melisma.app.settings.LyricsFont
 import com.melisma.app.settings.MediaPanelSide
 import com.melisma.app.settings.PopupShape
 import com.melisma.app.settings.Settings
+import com.melisma.app.settings.SettingsBackup
 import com.melisma.app.settings.TextAnimationStyle
 import com.melisma.app.settings.ViewMode
 import androidx.compose.ui.geometry.Rect
@@ -64,12 +65,16 @@ import com.melisma.app.ui.components.ReorderableColumn
 import com.melisma.app.settings.TranslationSource
 import com.melisma.app.settings.CacheServerMode
 import com.melisma.app.lyrics.LyricsRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.Image
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -1161,8 +1166,8 @@ fun SettingsSheet(
             }
 
             Section(
-                title = "Storage",
-                subtitle = "The lyrics cache",
+                title = "Storage and backup",
+                subtitle = "The lyrics cache, and your settings in a file",
                 open = openSection == "storage",
                 accent = accent,
                 onToggle = { openSection = if (openSection == "storage") null else "storage" },
@@ -1188,6 +1193,12 @@ fun SettingsSheet(
                         }
                     },
                 )
+
+                Spacer(Modifier.height(6.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+                Spacer(Modifier.height(10.dp))
+
+                SettingsBackupRows(container = container, accent = accent)
             }
 
             Section(
@@ -2123,6 +2134,189 @@ private fun ProviderRow(
             ),
         )
     }
+}
+
+/**
+ * Settings to a file and back again.
+ *
+ * Two rows and a switch, because the interesting decision is only ever one question: do the tokens
+ * come too? Settings go out as readable JSON, which is what makes a new phone a restore rather than
+ * an evening of tapping. Credentials do not, unless asked for and given a passphrase — they are live
+ * keys to somebody's own accounts, and the app keeps them out of Android's backup for that reason;
+ * writing them into a plain file in Downloads for the convenience of one restore would undo it.
+ *
+ * The file is chosen through the system picker, so this needs no storage permission and the user
+ * decides where it lands.
+ */
+@Composable
+private fun SettingsBackupRows(container: AppContainer, accent: Color) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val store = container.settings
+
+    var includeTokens by remember { mutableStateOf(false) }
+    var passphrase by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    /** Held only between picking a file and being told the passphrase for it. */
+    var pending by remember { mutableStateOf<String?>(null) }
+
+    fun finish(message: String) {
+        status = message
+        busy = false
+    }
+
+    val save = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = SettingsBackup.write(
+                        settings = store.exportableSettings(),
+                        credentials = if (includeTokens) store.exportableCredentials() else emptyMap(),
+                        passphrase = passphrase.takeIf { includeTokens },
+                    )
+                    context.contentResolver.openOutputStream(uri)?.use {
+                        it.write(text.toByteArray())
+                    } ?: error("could not write there")
+                    text.length
+                }
+            }
+            finish(
+                result.fold(
+                    onSuccess = { size ->
+                        val tokens = if (includeTokens) ", tokens encrypted" else ", no tokens"
+                        "Saved — ${size / 1024 + 1} KB$tokens."
+                    },
+                    onFailure = { "Could not save: ${it.message ?: "unknown error"}" },
+                ),
+            )
+        }
+    }
+
+    fun applyRestore(text: String, key: String?) {
+        busy = true
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) { SettingsBackup.read(text, key) }
+            when (outcome) {
+                is SettingsBackup.Restore.Ready -> {
+                    store.restore(outcome.settings, outcome.credentials)
+                    pending = null
+                    val tokens = if (outcome.credentials.isEmpty()) "" else " and its tokens"
+                    finish("Restored ${outcome.settings.size} settings$tokens.")
+                }
+                SettingsBackup.Restore.NeedsPassphrase -> {
+                    pending = text
+                    finish("That file holds tokens. Type its passphrase, then Restore again.")
+                }
+                SettingsBackup.Restore.WrongPassphrase ->
+                    finish("That passphrase does not open the tokens in that file.")
+                SettingsBackup.Restore.NotABackup ->
+                    finish("That is not a Melisma settings file.")
+            }
+        }
+    }
+
+    val open = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes().decodeToString()
+                    }
+                }.getOrNull()
+            }
+            if (text == null) {
+                finish("Could not read that file.")
+            } else {
+                applyRestore(text, passphrase.takeIf { it.isNotBlank() })
+            }
+        }
+    }
+
+    ToggleRow(
+        title = "Include your tokens",
+        subtitle = "Encrypted under a passphrase you choose",
+        checked = includeTokens,
+        accent = accent,
+        onCheckedChange = { includeTokens = it },
+    )
+    Help(
+        "Off, the file holds settings only and is plain readable JSON — safe to keep anywhere, and " +
+            "it restores with no passphrase.\n\nOn, your Spotify, Apple, Musixmatch and NetEase " +
+            "credentials go in as well, encrypted with AES-256 under a key stretched from your " +
+            "passphrase. They are otherwise deliberately kept out of Android's own backup, which is " +
+            "a promise this would break if it wrote them in the clear. Lose the passphrase and that " +
+            "half of the file is gone — there is no way back into it, by design.",
+    )
+
+    if (includeTokens || pending != null) {
+        SecretField(
+            label = "Passphrase",
+            help = "Used to encrypt the tokens on the way out, and to open them on the way back in.",
+            value = passphrase,
+            accent = accent,
+            onChange = { passphrase = it },
+        )
+    }
+
+    val ready = !busy && (!includeTokens || passphrase.length >= MIN_PASSPHRASE)
+    ActionRow(
+        title = when {
+            busy -> "Working…"
+            includeTokens && passphrase.length < MIN_PASSPHRASE ->
+                "Choose a passphrase of at least $MIN_PASSPHRASE characters"
+            else -> "Back up settings to a file"
+        },
+        subtitle = "You choose where it goes",
+        accent = accent,
+        onClick = {
+            if (ready) {
+                status = null
+                save.launch("melisma-settings-${today()}.json")
+            }
+        },
+    )
+
+    ActionRow(
+        title = if (pending != null) "Restore (with that passphrase)" else "Restore from a file",
+        subtitle = "Anything the file does not mention is left as it is",
+        accent = accent,
+        onClick = {
+            if (busy) return@ActionRow
+            status = null
+            val held = pending
+            if (held != null) {
+                applyRestore(held, passphrase.takeIf { it.isNotBlank() })
+            } else {
+                // Many providers hand JSON back as octet-stream, so a strict filter hides the very
+                // file the user is looking for.
+                open.launch(arrayOf("application/json", "text/plain", "*/*"))
+            }
+        },
+    )
+
+    status?.let { Hint(it) }
+}
+
+/** Long enough that stretching the key is worth doing at all. */
+private const val MIN_PASSPHRASE = 8
+
+private fun today(): String {
+    val now = java.util.Calendar.getInstance()
+    return "%04d-%02d-%02d".format(
+        now.get(java.util.Calendar.YEAR),
+        now.get(java.util.Calendar.MONTH) + 1,
+        now.get(java.util.Calendar.DAY_OF_MONTH),
+    )
 }
 
 /** A single-line text field for a token, cookie or endpoint. */

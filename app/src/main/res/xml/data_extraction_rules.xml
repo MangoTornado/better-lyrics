@@ -8,11 +8,15 @@
     <cloud-backup>
         <include domain="sharedpref" path="." />
         <exclude domain="sharedpref" path="melisma-credentials.xml" />
+    <!-- The same file under the name it had before the app was renamed. -->
+    <exclude domain="sharedpref" path="better-lyrics-credentials.xml" />
         <include domain="file" path="local-lyrics" />
     </cloud-backup>
     <device-transfer>
         <include domain="sharedpref" path="." />
         <exclude domain="sharedpref" path="melisma-credentials.xml" />
+    <!-- The same file under the name it had before the app was renamed. -->
+    <exclude domain="sharedpref" path="better-lyrics-credentials.xml" />
         <include domain="file" path="local-lyrics" />
     </device-transfer>
 </data-extraction-rules>

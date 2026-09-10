@@ -12,5 +12,7 @@
 <full-backup-content>
     <include domain="sharedpref" path="." />
     <exclude domain="sharedpref" path="melisma-credentials.xml" />
+    <!-- The same file under the name it had before the app was renamed. -->
+    <exclude domain="sharedpref" path="better-lyrics-credentials.xml" />
     <include domain="file" path="local-lyrics" />
 </full-backup-content>

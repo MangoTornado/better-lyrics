@@ -439,7 +439,80 @@ class SettingsStore(context: Context) : ProviderCredentials {
         context.getSharedPreferences(SECRETS_FILE, Context.MODE_PRIVATE)
 
     init {
+        adoptPreRenameFiles(context)
         migrateSecrets()
+    }
+
+    /**
+     * Take over the preference files written when the app was called Better Lyrics.
+     *
+     * The rename changed the application id, which means Android treats the new build as a different
+     * app and gives it empty storage — so a phone that had the old one installed keeps its settings on
+     * disk under the old file names with nothing reading them. This adopts them once.
+     *
+     * Only when the current files are *empty*, so it can never overwrite a live setting, and it
+     * copies rather than moves: if this turns out to have gone wrong, the originals are still there.
+     * Delete this once nobody is upgrading across the rename any more.
+     */
+    private fun adoptPreRenameFiles(context: Context) {
+        fun adopt(from: String, into: SharedPreferences) {
+            if (into.all.isNotEmpty()) return
+            val legacy = context.getSharedPreferences(from, Context.MODE_PRIVATE)
+            if (legacy.all.isEmpty()) return
+            val editor = into.edit()
+            for ((key, value) in legacy.all) {
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
+            }
+            editor.commit()
+        }
+        adopt(LEGACY_FILE, prefs)
+        adopt(LEGACY_SECRETS_FILE, secrets)
+    }
+
+    // ---- backup and restore -------------------------------------------------
+
+    /**
+     * Every ordinary setting, for a file the user keeps. Never a credential: those are asked for
+     * separately, encrypted separately, and it must not be possible to include one by forgetting.
+     */
+    fun exportableSettings(): Map<String, Any?> = prefs.all.filterKeys { it !in SECRET_KEYS }
+
+    /** Every credential. Only ever called when the user has asked for them and given a passphrase. */
+    fun exportableCredentials(): Map<String, Any?> = secrets.all
+
+    /**
+     * Put values back.
+     *
+     * Keys absent from the file are left alone rather than reset, so restoring an old backup onto a
+     * newer version does not wipe settings that did not exist when it was written. Unknown keys are
+     * written anyway and simply never read — harmless, and cheaper than a list to keep in step.
+     */
+    fun restore(settings: Map<String, Any?>, credentials: Map<String, Any?>) {
+        if (settings.isNotEmpty()) apply(prefs, settings)
+        if (credentials.isNotEmpty()) apply(secrets, credentials)
+        _settings.value = read()
+    }
+
+    private fun apply(target: SharedPreferences, values: Map<String, Any?>) {
+        val editor = target.edit()
+        for ((key, value) in values) {
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            }
+        }
+        editor.commit()
     }
 
     /**
@@ -969,6 +1042,10 @@ class SettingsStore(context: Context) : ProviderCredentials {
          * `data_extraction_rules.xml`, which is the whole point of it existing.
          */
         const val SECRETS_FILE = "melisma-credentials"
+
+        /** What the same two files were called before the app was renamed. See adoptPreRenameFiles. */
+        const val LEGACY_FILE = "better-lyrics"
+        const val LEGACY_SECRETS_FILE = "better-lyrics-credentials"
 
         /** Everything that authenticates as the user. Nothing here may be backed up. */
         val SECRET_KEYS = listOf(

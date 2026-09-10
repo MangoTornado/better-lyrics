@@ -203,6 +203,13 @@ getting kanji readings right and of translating without sending your lyrics anyw
 
 *Settings → Timing → Sync offset.* Negative for Bluetooth. See [above](#using-it).
 
+**Can I move my settings to a new phone?**
+
+*Settings → Storage and backup → Back up settings to a file.* You choose where the file goes. It is
+plain readable JSON by default; tick **Include your tokens** and your credentials go in as well,
+encrypted under a passphrase you choose. Restoring is the row underneath, and anything the file does
+not mention is left as it is.
+
 **A track has no lyrics, or the wrong ones.**
 
 *Settings → This track → Look this track up again* forces a fresh lookup. If nothing has it, you can

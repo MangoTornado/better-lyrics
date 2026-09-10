@@ -31,6 +31,10 @@ into a note that syncs, or a message to yourself. If the phone is plugged in and
 adb shell input text 'paste-the-value-here'   # tap the field in the app first
 ```
 
+Once they are in, you never have to do it twice: **Settings → Storage and backup** writes them to a
+file, encrypted under a passphrase, so a new phone is a restore rather than another trip through
+developer tools.
+
 ---
 
 ## Spotify
